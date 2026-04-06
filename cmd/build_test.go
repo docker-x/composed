@@ -24,10 +24,10 @@ func TestFlattenValues(t *testing.T) {
 			prefix: "",
 			input: map[string]interface{}{
 				"image": map[string]interface{}{
-					"tag": "main-stable",
+					"tag": testTagMainStable,
 				},
 			},
-			want: map[string]string{"image.tag": "main-stable"},
+			want: map[string]string{"image.tag": testTagMainStable},
 		},
 		{
 			name:   "with prefix",

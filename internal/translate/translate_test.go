@@ -1237,10 +1237,10 @@ func TestLabelsMatch(t *testing.T) {
 		{"", testLabelAppWeb, false},
 		{testLabelAppWeb, "", false},
 		// Regression: substring false positives (issue #6 thread 10)
-		{"app=we", "app=web", false},
-		{"app=web", "app=web-frontend", false},
-		{"app=web", "my-app=web", false},
-		{"tier=front", "app=web,tier=frontend", false},
+		{"app=we", testLabelAppWeb, false},
+		{testLabelAppWeb, "app=web-frontend", false},
+		{testLabelAppWeb, "my-app=web", false},
+		{"tier=front", testLabelAppWebFrontend, false},
 	}
 
 	for _, tt := range tests {

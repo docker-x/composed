@@ -19,7 +19,7 @@ func Merge(project string, fragments ...*compose.File) *compose.File {
 	return out
 }
 
-func mergeFragment(out *compose.File, f *compose.File) {
+func mergeFragment(out, f *compose.File) {
 	if f == nil {
 		return
 	}
@@ -31,7 +31,7 @@ func mergeFragment(out *compose.File, f *compose.File) {
 	mergeFragmentConfigs(out, f)
 }
 
-func mergeHeader(out *compose.File, f *compose.File) {
+func mergeHeader(out, f *compose.File) {
 	if f.Header != "" {
 		if out.Header != "" {
 			out.Header += "\n"
@@ -40,7 +40,7 @@ func mergeHeader(out *compose.File, f *compose.File) {
 	}
 }
 
-func mergeFragmentServices(out *compose.File, f *compose.File) {
+func mergeFragmentServices(out, f *compose.File) {
 	// Merge services
 	for name, svc := range f.Services {
 		if existing, ok := out.Services[name]; ok {
@@ -52,7 +52,7 @@ func mergeFragmentServices(out *compose.File, f *compose.File) {
 	}
 }
 
-func mergeFragmentVolumes(out *compose.File, f *compose.File) {
+func mergeFragmentVolumes(out, f *compose.File) {
 	// Union merge volumes
 	for name, vol := range f.Volumes {
 		if _, ok := out.Volumes[name]; !ok {
@@ -61,7 +61,7 @@ func mergeFragmentVolumes(out *compose.File, f *compose.File) {
 	}
 }
 
-func mergeFragmentNetworks(out *compose.File, f *compose.File) {
+func mergeFragmentNetworks(out, f *compose.File) {
 	// Union merge networks
 	for name, net := range f.Networks {
 		if _, ok := out.Networks[name]; !ok {
@@ -70,7 +70,7 @@ func mergeFragmentNetworks(out *compose.File, f *compose.File) {
 	}
 }
 
-func mergeFragmentConfigs(out *compose.File, f *compose.File) {
+func mergeFragmentConfigs(out, f *compose.File) {
 	// Union merge configs
 	for name, cfg := range f.Configs {
 		if _, ok := out.Configs[name]; !ok {
