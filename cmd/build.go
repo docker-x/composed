@@ -417,18 +417,18 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 		switch dep := svc.DependsOn.(type) {
 		case []interface{}:
 			for _, item := range dep {
-				name := fmt.Sprintf("%v", item)
-				cs.DependsOn[name] = compose.DependsOnCondition{Condition: "service_started"}
+				depName := fmt.Sprintf("%v", item)
+				cs.DependsOn[depName] = compose.DependsOnCondition{Condition: "service_started"}
 			}
 		case map[string]interface{}:
-			for name, cond := range dep {
+			for depName, cond := range dep {
 				condition := "service_started"
 				if cm, ok := cond.(map[string]interface{}); ok {
 					if c, ok := cm["condition"].(string); ok {
 						condition = c
 					}
 				}
-				cs.DependsOn[name] = compose.DependsOnCondition{Condition: condition}
+				cs.DependsOn[depName] = compose.DependsOnCondition{Condition: condition}
 			}
 		}
 
