@@ -1,0 +1,27 @@
+# Binaries
+composed
+/composed
+
+# Build output
+dist/
+*.exe
+
+# Go
+*.test
+*.out
+cover.html
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Generated compose output
+docker-compose.yaml
+!examples/**/docker-compose.yaml

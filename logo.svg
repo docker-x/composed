@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1D63ED"/>
+      <stop offset="100%" stop-color="#0B3D91"/>
+    </linearGradient>
+    <linearGradient id="layer1" x1="128" y1="200" x2="384" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#e0e8ff" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="layer2" x1="128" y1="256" x2="384" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.80"/>
+      <stop offset="100%" stop-color="#c8d6ff" stop-opacity="0.80"/>
+    </linearGradient>
+    <linearGradient id="layer3" x1="128" y1="312" x2="384" y2="312" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.60"/>
+      <stop offset="100%" stop-color="#a8bcff" stop-opacity="0.60"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="448" height="448" rx="80" fill="url(#bg)"/>
+
+  <!-- Three stacked layers representing compose fragments merging -->
+  <!-- Top layer (helm chart) -->
+  <g transform="translate(0, -40)">
+    <rect x="144" y="172" width="224" height="56" rx="12" fill="url(#layer1)"/>
+    <!-- Helm wheel icon hint -->
+    <circle cx="184" cy="200" r="14" fill="none" stroke="#1D63ED" stroke-width="3"/>
+    <circle cx="184" cy="200" r="5" fill="#1D63ED"/>
+    <line x1="184" y1="183" x2="184" y2="189" stroke="#1D63ED" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="184" y1="211" x2="184" y2="217" stroke="#1D63ED" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="167" y1="200" x2="173" y2="200" stroke="#1D63ED" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="195" y1="200" x2="201" y2="200" stroke="#1D63ED" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Label bars -->
+    <rect x="212" y="190" width="80" height="8" rx="4" fill="#1D63ED" opacity="0.4"/>
+    <rect x="212" y="204" width="56" height="8" rx="4" fill="#1D63ED" opacity="0.25"/>
+  </g>
+
+  <!-- Middle layer (docker image) -->
+  <g transform="translate(0, -40)">
+    <rect x="144" y="244" width="224" height="56" rx="12" fill="url(#layer2)"/>
+    <!-- Container/box icon hint -->
+    <rect x="170" y="258" width="28" height="28" rx="4" fill="none" stroke="#1D63ED" stroke-width="3"/>
+    <rect x="170" y="258" width="28" height="10" rx="2" fill="#1D63ED" opacity="0.3"/>
+    <!-- Label bars -->
+    <rect x="212" y="262" width="100" height="8" rx="4" fill="#1D63ED" opacity="0.35"/>
+    <rect x="212" y="276" width="68" height="8" rx="4" fill="#1D63ED" opacity="0.2"/>
+  </g>
+
+  <!-- Bottom layer (compose file) -->
+  <g transform="translate(0, -40)">
+    <rect x="144" y="316" width="224" height="56" rx="12" fill="url(#layer3)"/>
+    <!-- File icon hint -->
+    <path d="M172 330 L192 330 L198 336 L198 358 L172 358 Z" fill="none" stroke="#1D63ED" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M192 330 L192 336 L198 336" fill="none" stroke="#1D63ED" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- Label bars -->
+    <rect x="212" y="334" width="72" height="8" rx="4" fill="#1D63ED" opacity="0.3"/>
+    <rect x="212" y="348" width="48" height="8" rx="4" fill="#1D63ED" opacity="0.15"/>
+  </g>
+
+  <!-- Merge arrows converging down -->
+  <g stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.9">
+    <!-- Left converging arrow -->
+    <path d="M128 180 L128 380 L240 410"/>
+    <!-- Right converging arrow -->
+    <path d="M384 180 L384 380 L272 410"/>
+    <!-- Arrowhead -->
+    <polygon points="256,420 240,405 272,405" fill="#ffffff" stroke="none" opacity="0.9"/>
+  </g>
+
+  <!-- Output: small compose file icon at bottom -->
+  <g transform="translate(236, 428)">
+    <rect x="0" y="0" width="40" height="48" rx="6" fill="#ffffff" opacity="0.95"/>
+    <rect x="8" y="10" width="24" height="4" rx="2" fill="#1D63ED" opacity="0.5"/>
+    <rect x="8" y="18" width="18" height="4" rx="2" fill="#1D63ED" opacity="0.35"/>
+    <rect x="8" y="26" width="22" height="4" rx="2" fill="#1D63ED" opacity="0.35"/>
+    <rect x="8" y="34" width="14" height="4" rx="2" fill="#1D63ED" opacity="0.2"/>
+  </g>
+</svg>

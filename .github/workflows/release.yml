@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # Gate: run full test suite before releasing
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test -race -shuffle=on ./...
+
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Trigger pkg.go.dev to index the new version
+  publish-go-module:
+    name: Publish Go Module
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger pkg.go.dev indexing
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          url="https://proxy.golang.org/github.com/docker-x/composed/@v/${tag}.info"
+          echo "Requesting: $url"
+          curl -sf "$url" || echo "pkg.go.dev will index on next fetch"
