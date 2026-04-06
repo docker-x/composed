@@ -350,7 +350,10 @@ func TestSplitYAMLDocs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			docs := splitYAMLDocs([]byte(tt.input))
+			docs, err := splitYAMLDocs([]byte(tt.input))
+			if err != nil {
+				t.Fatalf("splitYAMLDocs() error: %v", err)
+			}
 			if len(docs) != tt.want {
 				t.Errorf("splitYAMLDocs() returned %d docs, want %d", len(docs), tt.want)
 			}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -43,7 +44,10 @@ type SkippedResource struct {
 func Parse(data []byte) (*Manifests, error) {
 	m := &Manifests{}
 
-	docs := splitYAMLDocs(data)
+	docs, err := splitYAMLDocs(data)
+	if err != nil {
+		return nil, err
+	}
 	for i, doc := range docs {
 		doc = bytes.TrimSpace(doc)
 		if len(doc) == 0 {
@@ -151,13 +155,16 @@ func Parse(data []byte) (*Manifests, error) {
 
 // splitYAMLDocs splits multi-document YAML on document boundaries using a
 // proper YAML decoder, which correctly handles "---" inside block scalars.
-func splitYAMLDocs(data []byte) [][]byte {
+func splitYAMLDocs(data []byte) ([][]byte, error) {
 	var docs [][]byte
 	dec := goyaml.NewDecoder(bytes.NewReader(data))
 	for {
 		var doc interface{}
 		if err := dec.Decode(&doc); err != nil {
-			break
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("invalid YAML: %w", err)
 		}
 		if doc == nil {
 			continue
@@ -171,7 +178,7 @@ func splitYAMLDocs(data []byte) [][]byte {
 			docs = append(docs, out)
 		}
 	}
-	return docs
+	return docs, nil
 }
 
 func unmarshalK8s(jsonData []byte, obj runtime.Object) error {

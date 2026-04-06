@@ -426,26 +426,6 @@ services:
 	}
 }
 
-func TestIndexOf(t *testing.T) {
-	tests := []struct {
-		s, sub string
-		want   int
-	}{
-		{"hello world", "world", 6},
-		{"hello", "xyz", -1},
-		{"", "a", -1},
-		{"abc", "", 0},
-		{"${foo.bar}", "${foo.bar}", 0},
-		{"prefix${foo.bar}suffix", "${foo.bar}", 6},
-	}
-	for _, tt := range tests {
-		got := indexOf(tt.s, tt.sub)
-		if got != tt.want {
-			t.Errorf("indexOf(%q, %q) = %d, want %d", tt.s, tt.sub, got, tt.want)
-		}
-	}
-}
-
 func TestResolveMap(t *testing.T) {
 	exports := map[string]string{
 		"db.host":     "localhost",

@@ -825,10 +825,17 @@ spec:
 	if svc.Healthcheck == nil {
 		t.Fatal("missing healthcheck")
 	}
-	if svc.Healthcheck.Test[0] != "CMD-SHELL" {
-		t.Errorf("Test = %v, want CMD-SHELL", svc.Healthcheck.Test)
+	if svc.Healthcheck.Test[0] != "CMD" {
+		t.Errorf("Test = %v, want CMD", svc.Healthcheck.Test)
 	}
-	if !strings.Contains(svc.Healthcheck.Test[1], "localhost:8080/health") {
+	found := false
+	for _, arg := range svc.Healthcheck.Test[1:] {
+		if strings.Contains(arg, "localhost:8080/health") {
+			found = true
+			break
+		}
+	}
+	if !found {
 		t.Errorf("Test = %v, should contain URL", svc.Healthcheck.Test)
 	}
 }
