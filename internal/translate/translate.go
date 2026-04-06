@@ -163,7 +163,8 @@ func (c *translateCtx) translateStatefulSets() {
 
 		// Inject synthetic PVC volumes for VolumeClaimTemplates so that
 		// container volumeMounts referencing them get translated properly.
-		for _, vct := range ss.Spec.VolumeClaimTemplates {
+		for i := range ss.Spec.VolumeClaimTemplates {
+			vct := &ss.Spec.VolumeClaimTemplates[i]
 			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 				Name: vct.Name,
 				VolumeSource: corev1.VolumeSource{
@@ -177,7 +178,8 @@ func (c *translateCtx) translateStatefulSets() {
 		c.translatePodSpec(name, labels, &podSpec, ss.Spec.Replicas)
 
 		// StatefulSet volumeClaimTemplates → named volumes
-		for _, vct := range ss.Spec.VolumeClaimTemplates {
+		for i := range ss.Spec.VolumeClaimTemplates {
+			vct := &ss.Spec.VolumeClaimTemplates[i]
 			c.cf.Volumes[vct.Name] = &compose.Volume{}
 		}
 

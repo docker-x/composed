@@ -401,8 +401,8 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 
 	f := compose.NewFile()
 
-	for name, svc := range raw.Services {
-		svc := svc // avoid rangeValCopy
+	for name := range raw.Services {
+		svc := raw.Services[name]
 		cs := compose.NewService(svc.Image)
 		cs.Ports = svc.Ports
 		cs.Volumes = svc.Volumes

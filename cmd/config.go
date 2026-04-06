@@ -76,7 +76,8 @@ func scaffoldHelmValues() error {
 	configDir := filepath.Dir(initFile)
 	created := 0
 
-	for name, svc := range f.Services {
+	for name := range f.Services {
+		svc := f.Services[name]
 		if svc.XHelm == nil || svc.XHelm.Chart == "" {
 			continue
 		}

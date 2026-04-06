@@ -100,7 +100,8 @@ func Parse(data []byte) (*File, error) {
 func (f *File) ResolveRefs() error {
 	// Build export index: service_name.key → value
 	exports := make(map[string]string)
-	for name, svc := range f.Services {
+	for name := range f.Services {
+		svc := f.Services[name]
 		for k, v := range svc.XExports {
 			exports[name+"."+k] = v
 		}
