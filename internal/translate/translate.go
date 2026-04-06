@@ -73,11 +73,11 @@ func Translate(m *k8s.Manifests, opts Opts) (*Result, error) {
 	}
 
 	ctx := &translateCtx{
-		m:       m,
-		skip:    skipSet,
-		cf:      compose.NewFile(),
-		report:  &Report{},
-		cmIndex: make(map[string]*corev1.ConfigMap),
+		m:        m,
+		skip:     skipSet,
+		cf:       compose.NewFile(),
+		report:   &Report{},
+		cmIndex:  make(map[string]*corev1.ConfigMap),
 		secIndex: make(map[string]*corev1.Secret),
 		pvcIndex: make(map[string]*corev1.PersistentVolumeClaim),
 	}

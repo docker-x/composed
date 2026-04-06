@@ -41,8 +41,8 @@ func TestParseOCIRef(t *testing.T) {
 			ok:       true,
 		},
 		{
-			ref:  "oci://no-repo",
-			ok:   false,
+			ref: "oci://no-repo",
+			ok:  false,
 		},
 		{
 			ref:      "docker.io/library/nginx:latest",

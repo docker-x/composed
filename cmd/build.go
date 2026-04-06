@@ -12,8 +12,8 @@ import (
 	"github.com/docker-x/composed/internal/helm"
 	"github.com/docker-x/composed/internal/merge"
 	"github.com/docker-x/composed/internal/translate"
-	"gopkg.in/yaml.v3"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var buildCmd = &cobra.Command{

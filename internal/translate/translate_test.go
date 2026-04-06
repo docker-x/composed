@@ -1254,11 +1254,11 @@ func TestContainsStr(t *testing.T) {
 
 func TestConvertResourceSpec(t *testing.T) {
 	tests := []struct {
-		name     string
-		cpu      string
-		memory   string
-		wantCPU  string
-		wantMem  string
+		name    string
+		cpu     string
+		memory  string
+		wantCPU string
+		wantMem string
 	}{
 		{"millicpu", "500m", "256Mi", "0.50", "256M"},
 		{"whole cpu", "2", "1Gi", "2.00", "1G"},
