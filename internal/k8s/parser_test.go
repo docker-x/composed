@@ -4,6 +4,11 @@ import (
 	"testing"
 )
 
+const (
+	errFmtParse = "Parse error: %v"
+	errFmtName  = "Name = %q"
+)
+
 func TestParse_Deployment(t *testing.T) {
 	yaml := `
 apiVersion: apps/v1
@@ -29,7 +34,7 @@ spec:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.Deployments) != 1 {
 		t.Fatalf("Deployments count = %d, want 1", len(m.Deployments))
@@ -103,7 +108,7 @@ spec:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.ConfigMaps) != 1 {
 		t.Errorf("ConfigMaps = %d, want 1", len(m.ConfigMaps))
@@ -157,14 +162,14 @@ spec:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.StatefulSets) != 1 {
 		t.Fatalf("StatefulSets count = %d, want 1", len(m.StatefulSets))
 	}
 	ss := m.StatefulSets[0]
 	if ss.Name != "redis" {
-		t.Errorf("Name = %q", ss.Name)
+		t.Errorf(errFmtName, ss.Name)
 	}
 	if len(ss.Spec.VolumeClaimTemplates) != 1 {
 		t.Errorf("VolumeClaimTemplates = %d", len(ss.Spec.VolumeClaimTemplates))
@@ -192,13 +197,13 @@ spec:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.DaemonSets) != 1 {
 		t.Fatalf("DaemonSets count = %d, want 1", len(m.DaemonSets))
 	}
 	if m.DaemonSets[0].Name != "fluentd" {
-		t.Errorf("Name = %q", m.DaemonSets[0].Name)
+		t.Errorf(errFmtName, m.DaemonSets[0].Name)
 	}
 }
 
@@ -219,13 +224,13 @@ spec:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.Jobs) != 1 {
 		t.Fatalf("Jobs count = %d, want 1", len(m.Jobs))
 	}
 	if m.Jobs[0].Name != "db-migrate" {
-		t.Errorf("Name = %q", m.Jobs[0].Name)
+		t.Errorf(errFmtName, m.Jobs[0].Name)
 	}
 }
 
@@ -248,13 +253,13 @@ spec:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.CronJobs) != 1 {
 		t.Fatalf("CronJobs count = %d, want 1", len(m.CronJobs))
 	}
 	if m.CronJobs[0].Name != "backup" {
-		t.Errorf("Name = %q", m.CronJobs[0].Name)
+		t.Errorf(errFmtName, m.CronJobs[0].Name)
 	}
 }
 
@@ -282,7 +287,7 @@ metadata:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.Skipped) != 4 {
 		t.Fatalf("Skipped count = %d, want 4", len(m.Skipped))
@@ -305,7 +310,7 @@ func TestParse_EmptyDoc(t *testing.T) {
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	if len(m.Deployments) != 0 {
 		t.Errorf("should have no deployments")
@@ -320,7 +325,7 @@ metadata:
 `
 	m, err := Parse([]byte(yaml))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 	// No kind → skipped silently (not added to Skipped list)
 	if len(m.Skipped) != 0 {

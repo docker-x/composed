@@ -4,6 +4,23 @@ import (
 	"testing"
 )
 
+func assertOCIRef(t *testing.T, ref string, wantRegistry, wantRepo, wantTag string) {
+	t.Helper()
+	registry, repo, tag, ok := parseOCIRef(ref)
+	if !ok {
+		t.Fatalf("parseOCIRef(%q) returned ok=false", ref)
+	}
+	if registry != wantRegistry {
+		t.Errorf("registry = %q, want %q", registry, wantRegistry)
+	}
+	if repo != wantRepo {
+		t.Errorf("repo = %q, want %q", repo, wantRepo)
+	}
+	if tag != wantTag {
+		t.Errorf("tag = %q, want %q", tag, wantTag)
+	}
+}
+
 func TestParseOCIRef(t *testing.T) {
 	tests := []struct {
 		ref      string
@@ -55,23 +72,14 @@ func TestParseOCIRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.ref, func(t *testing.T) {
-			registry, repo, tag, ok := parseOCIRef(tt.ref)
-			if ok != tt.ok {
-				t.Errorf("ok = %v, want %v", ok, tt.ok)
+			if !tt.ok {
+				_, _, _, ok := parseOCIRef(tt.ref)
+				if ok {
+					t.Errorf("ok = true, want false")
+				}
 				return
 			}
-			if !ok {
-				return
-			}
-			if registry != tt.registry {
-				t.Errorf("registry = %q, want %q", registry, tt.registry)
-			}
-			if repo != tt.repo {
-				t.Errorf("repo = %q, want %q", repo, tt.repo)
-			}
-			if tag != tt.tag {
-				t.Errorf("tag = %q, want %q", tag, tt.tag)
-			}
+			assertOCIRef(t, tt.ref, tt.registry, tt.repo, tt.tag)
 		})
 	}
 }

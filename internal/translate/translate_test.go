@@ -8,6 +8,12 @@ import (
 	"github.com/docker-x/composed/internal/k8s"
 )
 
+const (
+	errMissingHealthcheck   = "missing healthcheck"
+	testLabelAppWebFrontend = "app=web,tier=frontend"
+	testLabelAppWeb         = "app=web"
+)
+
 // helper: parse K8s YAML and translate to compose
 func mustTranslate(t *testing.T, yaml string, opts Opts) *Result {
 	t.Helper()
@@ -775,7 +781,7 @@ spec:
 	result := mustTranslate(t, yaml, Opts{})
 	svc := result.Compose.Services["redis"]
 	if svc.Healthcheck == nil {
-		t.Fatal("missing healthcheck")
+		t.Fatal(errMissingHealthcheck)
 	}
 	if len(svc.Healthcheck.Test) < 2 || svc.Healthcheck.Test[0] != "CMD" {
 		t.Errorf("Test = %v", svc.Healthcheck.Test)
@@ -823,7 +829,7 @@ spec:
 	result := mustTranslate(t, yaml, Opts{})
 	svc := result.Compose.Services["web"]
 	if svc.Healthcheck == nil {
-		t.Fatal("missing healthcheck")
+		t.Fatal(errMissingHealthcheck)
 	}
 	if svc.Healthcheck.Test[0] != "CMD" {
 		t.Errorf("Test = %v, want CMD", svc.Healthcheck.Test)
@@ -865,7 +871,7 @@ spec:
 	result := mustTranslate(t, yaml, Opts{})
 	svc := result.Compose.Services["db"]
 	if svc.Healthcheck == nil {
-		t.Fatal("missing healthcheck")
+		t.Fatal(errMissingHealthcheck)
 	}
 	if !strings.Contains(strings.Join(svc.Healthcheck.Test, " "), "5432") {
 		t.Errorf("Test = %v, should check port 5432", svc.Healthcheck.Test)
@@ -1208,7 +1214,7 @@ func TestSerializeLabels(t *testing.T) {
 	labels := map[string]string{"app": "web", "tier": "frontend"}
 	result := serializeLabels(labels)
 	// Should be sorted
-	if result != "app=web,tier=frontend" {
+	if result != testLabelAppWebFrontend {
 		t.Errorf("serializeLabels = %q", result)
 	}
 }
@@ -1225,11 +1231,11 @@ func TestLabelsMatch(t *testing.T) {
 		selector, pod string
 		want          bool
 	}{
-		{"app=web", "app=web,tier=frontend", true},
-		{"app=web,tier=frontend", "app=web,tier=frontend", true},
-		{"app=web,tier=backend", "app=web,tier=frontend", false},
-		{"", "app=web", false},
-		{"app=web", "", false},
+		{testLabelAppWeb, testLabelAppWebFrontend, true},
+		{testLabelAppWebFrontend, testLabelAppWebFrontend, true},
+		{"app=web,tier=backend", testLabelAppWebFrontend, false},
+		{"", testLabelAppWeb, false},
+		{testLabelAppWeb, "", false},
 	}
 
 	for _, tt := range tests {

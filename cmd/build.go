@@ -16,6 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const defaultOutputFile = "docker-compose.yaml"
+
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build a mega docker-compose.yaml from a composed.yaml config",
@@ -57,12 +59,12 @@ var downCmd = &cobra.Command{
 
 func init() {
 	buildCmd.Flags().StringVarP(&buildFile, "file", "f", "composed.yaml", "Config file")
-	buildCmd.Flags().StringVarP(&buildOutput, "output", "o", "docker-compose.yaml", "Output file (- for stdout)")
+	buildCmd.Flags().StringVarP(&buildOutput, "output", "o", defaultOutputFile, "Output file (- for stdout)")
 	rootCmd.AddCommand(buildCmd)
 
 	upCmd.Flags().StringVarP(&upFile, "file", "f", "composed.yaml", "Config file")
-	upCmd.Flags().StringVarP(&upOutput, "output", "o", "docker-compose.yaml", "Output file")
-	downCmd.Flags().StringVarP(&downOutput, "output", "o", "docker-compose.yaml", "Compose file")
+	upCmd.Flags().StringVarP(&upOutput, "output", "o", defaultOutputFile, "Output file")
+	downCmd.Flags().StringVarP(&downOutput, "output", "o", defaultOutputFile, "Compose file")
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
 }
@@ -101,51 +103,16 @@ func doBuild() error {
 	}
 
 	// 3. Process each service → compose fragment
-	var fragments []*compose.File
-
-	// Process in dependency order
-	order := topoSort(cfg)
-	for _, name := range order {
-		svc := cfg.Services[name]
-		svcType := config.ServiceType(&svc)
-		fmt.Fprintf(os.Stderr, "Processing service %q (type: %s)...\n", name, svcType)
-
-		var frag *compose.File
-		var fragErr error
-
-		switch svcType {
-		case "image":
-			frag = imageToCompose(name, &svc)
-		case "compose":
-			frag, fragErr = composeFragment(&svc)
-		case "helm":
-			frag, fragErr = helmToCompose(name, &svc)
-		default:
-			return fmt.Errorf("service %q: unknown type %q", name, svcType)
-		}
-		if fragErr != nil {
-			return fmt.Errorf("service %q: %w", name, fragErr)
-		}
-
-		// Apply cross-service depends_on
-		if len(svc.DependsOn) > 0 && frag != nil {
-			applyDependsOn(frag, svc.DependsOn, cfg)
-		}
-
-		fragments = append(fragments, frag)
+	fragments, err := processServices(cfg)
+	if err != nil {
+		return err
 	}
 
 	// 4. Merge all fragments
 	merged := merge.Merge(cfg.Name, fragments...)
 
 	// 5. Label all services as composed-managed
-	for _, svc := range merged.Services {
-		if svc.Labels == nil {
-			svc.Labels = make(map[string]string)
-		}
-		svc.Labels["com.composed.managed"] = "true"
-		svc.Labels["com.composed.project"] = cfg.Name
-	}
+	labelServices(merged, cfg)
 
 	// 6. Set header
 	names := make([]string, 0, len(cfg.Services))
@@ -172,6 +139,53 @@ func doBuild() error {
 	fmt.Fprintf(os.Stderr, "Wrote %s (%d services, %d volumes)\n",
 		buildOutput, len(merged.Services), len(merged.Volumes))
 	return nil
+}
+
+func processServices(cfg *config.File) ([]*compose.File, error) {
+	var fragments []*compose.File
+
+	order := topoSort(cfg)
+	for _, name := range order {
+		svc := cfg.Services[name]
+		svcType := config.ServiceType(&svc)
+		fmt.Fprintf(os.Stderr, "Processing service %q (type: %s)...\n", name, svcType)
+
+		var frag *compose.File
+		var fragErr error
+
+		switch svcType {
+		case "image":
+			frag = imageToCompose(name, &svc)
+		case "compose":
+			frag, fragErr = composeFragment(&svc)
+		case "helm":
+			frag, fragErr = helmToCompose(name, &svc)
+		default:
+			return nil, fmt.Errorf("service %q: unknown type %q", name, svcType)
+		}
+		if fragErr != nil {
+			return nil, fmt.Errorf("service %q: %w", name, fragErr)
+		}
+
+		// Apply cross-service depends_on
+		if len(svc.DependsOn) > 0 && frag != nil {
+			applyDependsOn(frag, svc.DependsOn, cfg)
+		}
+
+		fragments = append(fragments, frag)
+	}
+
+	return fragments, nil
+}
+
+func labelServices(merged *compose.File, cfg *config.File) {
+	for _, svc := range merged.Services {
+		if svc.Labels == nil {
+			svc.Labels = make(map[string]string)
+		}
+		svc.Labels["com.composed.managed"] = "true"
+		svc.Labels["com.composed.project"] = cfg.Name
+	}
 }
 
 // --- Service processors ---
@@ -374,25 +388,9 @@ func topoSort(cfg *config.File) []string {
 // parseComposeYAML parses a docker-compose.yaml into our compose model.
 func parseComposeYAML(data []byte) (*compose.File, error) {
 	var raw struct {
-		Services map[string]struct {
-			Image       string            `yaml:"image"`
-			Command     interface{}       `yaml:"command"`
-			Entrypoint  interface{}       `yaml:"entrypoint"`
-			Environment interface{}       `yaml:"environment"`
-			Ports       []string          `yaml:"ports"`
-			Volumes     []string          `yaml:"volumes"`
-			DependsOn   interface{}       `yaml:"depends_on"`
-			Restart     string            `yaml:"restart"`
-			Labels      map[string]string `yaml:"labels"`
-			Healthcheck *struct {
-				Test     interface{} `yaml:"test"`
-				Interval string      `yaml:"interval"`
-				Timeout  string      `yaml:"timeout"`
-				Retries  int         `yaml:"retries"`
-			} `yaml:"healthcheck"`
-		} `yaml:"services"`
-		Volumes  map[string]interface{} `yaml:"volumes"`
-		Networks map[string]interface{} `yaml:"networks"`
+		Services map[string]rawServiceStruct `yaml:"services"`
+		Volumes  map[string]interface{}      `yaml:"volumes"`
+		Networks map[string]interface{}      `yaml:"networks"`
 	}
 
 	if err := yamlUnmarshal(data, &raw); err != nil {
@@ -402,61 +400,7 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 	f := compose.NewFile()
 
 	for name := range raw.Services {
-		svc := raw.Services[name]
-		cs := compose.NewService(svc.Image)
-		cs.Ports = svc.Ports
-		cs.Volumes = svc.Volumes
-		cs.Restart = svc.Restart
-		cs.Command = toStringSlice(svc.Command)
-		cs.Entrypoint = toStringSlice(svc.Entrypoint)
-		for k, v := range svc.Labels {
-			cs.Labels[k] = v
-		}
-
-		// Parse depends_on (can be list or map with conditions)
-		switch dep := svc.DependsOn.(type) {
-		case []interface{}:
-			for _, item := range dep {
-				depName := fmt.Sprintf("%v", item)
-				cs.DependsOn[depName] = compose.DependsOnCondition{Condition: "service_started"}
-			}
-		case map[string]interface{}:
-			for depName, cond := range dep {
-				condition := "service_started"
-				if cm, ok := cond.(map[string]interface{}); ok {
-					if c, ok := cm["condition"].(string); ok {
-						condition = c
-					}
-				}
-				cs.DependsOn[depName] = compose.DependsOnCondition{Condition: condition}
-			}
-		}
-
-		// Parse environment (can be map or list)
-		switch env := svc.Environment.(type) {
-		case map[string]interface{}:
-			for k, v := range env {
-				cs.Environment[k] = fmt.Sprintf("%v", v)
-			}
-		case []interface{}:
-			for _, item := range env {
-				s := fmt.Sprintf("%v", item)
-				if k, v, ok := strings.Cut(s, "="); ok {
-					cs.Environment[k] = v
-				}
-			}
-		}
-
-		if svc.Healthcheck != nil {
-			cs.Healthcheck = &compose.Healthcheck{
-				Test:     toStringSlice(svc.Healthcheck.Test),
-				Interval: svc.Healthcheck.Interval,
-				Timeout:  svc.Healthcheck.Timeout,
-				Retries:  svc.Healthcheck.Retries,
-			}
-		}
-
-		f.Services[name] = cs
+		f.Services[name] = parseRawService(raw.Services[name])
 	}
 
 	for name := range raw.Volumes {
@@ -468,6 +412,95 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 	}
 
 	return f, nil
+}
+
+type rawServiceStruct struct {
+	Image       string            `yaml:"image"`
+	Command     interface{}       `yaml:"command"`
+	Entrypoint  interface{}       `yaml:"entrypoint"`
+	Environment interface{}       `yaml:"environment"`
+	Ports       []string          `yaml:"ports"`
+	Volumes     []string          `yaml:"volumes"`
+	DependsOn   interface{}       `yaml:"depends_on"`
+	Restart     string            `yaml:"restart"`
+	Labels      map[string]string `yaml:"labels"`
+	Healthcheck *struct {
+		Test     interface{} `yaml:"test"`
+		Interval string      `yaml:"interval"`
+		Timeout  string      `yaml:"timeout"`
+		Retries  int         `yaml:"retries"`
+	} `yaml:"healthcheck"`
+}
+
+func parseRawService(svc rawServiceStruct) *compose.Service {
+	cs := compose.NewService(svc.Image)
+	cs.Ports = svc.Ports
+	cs.Volumes = svc.Volumes
+	cs.Restart = svc.Restart
+	cs.Command = toStringSlice(svc.Command)
+	cs.Entrypoint = toStringSlice(svc.Entrypoint)
+	for k, v := range svc.Labels {
+		cs.Labels[k] = v
+	}
+
+	for depName, cond := range parseDependsOn(svc.DependsOn) {
+		cs.DependsOn[depName] = cond
+	}
+
+	for k, v := range parseEnvironment(svc.Environment) {
+		cs.Environment[k] = v
+	}
+
+	if svc.Healthcheck != nil {
+		cs.Healthcheck = &compose.Healthcheck{
+			Test:     toStringSlice(svc.Healthcheck.Test),
+			Interval: svc.Healthcheck.Interval,
+			Timeout:  svc.Healthcheck.Timeout,
+			Retries:  svc.Healthcheck.Retries,
+		}
+	}
+
+	return cs
+}
+
+func parseDependsOn(raw interface{}) map[string]compose.DependsOnCondition {
+	result := make(map[string]compose.DependsOnCondition)
+	switch dep := raw.(type) {
+	case []interface{}:
+		for _, item := range dep {
+			depName := fmt.Sprintf("%v", item)
+			result[depName] = compose.DependsOnCondition{Condition: "service_started"}
+		}
+	case map[string]interface{}:
+		for depName, cond := range dep {
+			condition := "service_started"
+			if cm, ok := cond.(map[string]interface{}); ok {
+				if c, ok := cm["condition"].(string); ok {
+					condition = c
+				}
+			}
+			result[depName] = compose.DependsOnCondition{Condition: condition}
+		}
+	}
+	return result
+}
+
+func parseEnvironment(raw interface{}) map[string]string {
+	result := make(map[string]string)
+	switch env := raw.(type) {
+	case map[string]interface{}:
+		for k, v := range env {
+			result[k] = fmt.Sprintf("%v", v)
+		}
+	case []interface{}:
+		for _, item := range env {
+			s := fmt.Sprintf("%v", item)
+			if k, v, ok := strings.Cut(s, "="); ok {
+				result[k] = v
+			}
+		}
+	}
+	return result
 }
 
 func toStringSlice(v interface{}) []string {

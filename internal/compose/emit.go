@@ -22,67 +22,10 @@ func Emit(f *File) (string, error) {
 		addScalar(doc, "name", f.Project)
 	}
 
-	// services:
-	if len(f.Services) > 0 {
-		svcNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, name := range sortedKeys(f.Services) {
-			svc := f.Services[name]
-			svcNode.Content = append(svcNode.Content,
-				scalarNode(name),
-				serviceNode(svc),
-			)
-		}
-		doc.Content = append(doc.Content, scalarNode("services"), svcNode)
-	}
-
-	// volumes:
-	if len(f.Volumes) > 0 {
-		volNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, name := range sortedKeys(f.Volumes) {
-			v := f.Volumes[name]
-			inner := &yaml.Node{Kind: yaml.MappingNode}
-			if v.Driver != "" && v.Driver != "local" {
-				addScalar(inner, "driver", v.Driver)
-			}
-			// Empty mapping = default volume
-			if len(inner.Content) == 0 {
-				volNode.Content = append(volNode.Content, scalarNode(name), &yaml.Node{Kind: yaml.MappingNode})
-			} else {
-				volNode.Content = append(volNode.Content, scalarNode(name), inner)
-			}
-		}
-		doc.Content = append(doc.Content, scalarNode("volumes"), volNode)
-	}
-
-	// networks:
-	if len(f.Networks) > 0 {
-		netNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, name := range sortedKeys(f.Networks) {
-			n := f.Networks[name]
-			inner := &yaml.Node{Kind: yaml.MappingNode}
-			if n.Driver != "" && n.Driver != "bridge" {
-				addScalar(inner, "driver", n.Driver)
-			}
-			netNode.Content = append(netNode.Content, scalarNode(name), inner)
-		}
-		doc.Content = append(doc.Content, scalarNode("networks"), netNode)
-	}
-
-	// configs:
-	if len(f.Configs) > 0 {
-		cfgNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, name := range sortedKeys(f.Configs) {
-			c := f.Configs[name]
-			inner := &yaml.Node{Kind: yaml.MappingNode}
-			if c.Content != "" {
-				addScalar(inner, "content", c.Content)
-			} else if c.File != "" {
-				addScalar(inner, "file", c.File)
-			}
-			cfgNode.Content = append(cfgNode.Content, scalarNode(name), inner)
-		}
-		doc.Content = append(doc.Content, scalarNode("configs"), cfgNode)
-	}
+	emitServices(doc, f.Services)
+	emitVolumes(doc, f.Volumes)
+	emitNetworks(doc, f.Networks)
+	emitConfigs(doc, f.Configs)
 
 	root := &yaml.Node{
 		Kind:    yaml.DocumentNode,
@@ -101,11 +44,90 @@ func Emit(f *File) (string, error) {
 	return buf.String(), nil
 }
 
+func emitServices(doc *yaml.Node, services map[string]*Service) {
+	if len(services) == 0 {
+		return
+	}
+	// services:
+	svcNode := &yaml.Node{Kind: yaml.MappingNode}
+	for _, name := range sortedKeys(services) {
+		svc := services[name]
+		svcNode.Content = append(svcNode.Content,
+			scalarNode(name),
+			serviceNode(svc),
+		)
+	}
+	doc.Content = append(doc.Content, scalarNode("services"), svcNode)
+}
+
+func emitVolumes(doc *yaml.Node, volumes map[string]*Volume) {
+	if len(volumes) == 0 {
+		return
+	}
+	// volumes:
+	volNode := &yaml.Node{Kind: yaml.MappingNode}
+	for _, name := range sortedKeys(volumes) {
+		v := volumes[name]
+		inner := &yaml.Node{Kind: yaml.MappingNode}
+		if v.Driver != "" && v.Driver != "local" {
+			addScalar(inner, "driver", v.Driver)
+		}
+		// Empty mapping = default volume
+		if len(inner.Content) == 0 {
+			volNode.Content = append(volNode.Content, scalarNode(name), &yaml.Node{Kind: yaml.MappingNode})
+		} else {
+			volNode.Content = append(volNode.Content, scalarNode(name), inner)
+		}
+	}
+	doc.Content = append(doc.Content, scalarNode("volumes"), volNode)
+}
+
+func emitNetworks(doc *yaml.Node, networks map[string]*Network) {
+	if len(networks) == 0 {
+		return
+	}
+	// networks:
+	netNode := &yaml.Node{Kind: yaml.MappingNode}
+	for _, name := range sortedKeys(networks) {
+		n := networks[name]
+		inner := &yaml.Node{Kind: yaml.MappingNode}
+		if n.Driver != "" && n.Driver != "bridge" {
+			addScalar(inner, "driver", n.Driver)
+		}
+		netNode.Content = append(netNode.Content, scalarNode(name), inner)
+	}
+	doc.Content = append(doc.Content, scalarNode("networks"), netNode)
+}
+
+func emitConfigs(doc *yaml.Node, configs map[string]*Config) {
+	if len(configs) == 0 {
+		return
+	}
+	// configs:
+	cfgNode := &yaml.Node{Kind: yaml.MappingNode}
+	for _, name := range sortedKeys(configs) {
+		c := configs[name]
+		inner := &yaml.Node{Kind: yaml.MappingNode}
+		if c.Content != "" {
+			addScalar(inner, "content", c.Content)
+		} else if c.File != "" {
+			addScalar(inner, "file", c.File)
+		}
+		cfgNode.Content = append(cfgNode.Content, scalarNode(name), inner)
+	}
+	doc.Content = append(doc.Content, scalarNode("configs"), cfgNode)
+}
+
 // --- Node builders ---
 
 func serviceNode(svc *Service) *yaml.Node {
 	n := &yaml.Node{Kind: yaml.MappingNode}
+	addServiceCore(n, svc)
+	addServiceOrchestration(n, svc)
+	return n
+}
 
+func addServiceCore(n *yaml.Node, svc *Service) {
 	addScalar(n, "image", svc.Image)
 
 	if len(svc.Entrypoint) > 0 {
@@ -133,6 +155,9 @@ func serviceNode(svc *Service) *yaml.Node {
 	if svc.ShmSize != "" {
 		addScalar(n, "shm_size", svc.ShmSize)
 	}
+}
+
+func addServiceOrchestration(n *yaml.Node, svc *Service) {
 	if len(svc.DependsOn) > 0 {
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, name := range sortedKeysMap2(svc.DependsOn) {
@@ -172,7 +197,6 @@ func serviceNode(svc *Service) *yaml.Node {
 		}
 		n.Content = append(n.Content, scalarNode("labels"), lblNode)
 	}
-	return n
 }
 
 func healthcheckNode(hc *Healthcheck) *yaml.Node {

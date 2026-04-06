@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+const testTagMainStable = "main-stable"
+
 func TestFlattenValues(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -74,6 +76,54 @@ func TestFlattenValues(t *testing.T) {
 	}
 }
 
+func checkSimpleKeyVal(t *testing.T, m map[string]interface{}) {
+	t.Helper()
+	if m["key"] != "val" {
+		t.Errorf("key = %v", m["key"])
+	}
+}
+
+func checkNestedKey(t *testing.T, m map[string]interface{}) {
+	t.Helper()
+	img, ok := m["image"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("image is not a map: %T", m["image"])
+	}
+	if img["tag"] != testTagMainStable {
+		t.Errorf("image.tag = %v", img["tag"])
+	}
+}
+
+func checkDeeplyNested(t *testing.T, m map[string]interface{}) {
+	t.Helper()
+	a := m["a"].(map[string]interface{})
+	b := a["b"].(map[string]interface{})
+	if b["c"] != "deep" {
+		t.Errorf("a.b.c = %v", b["c"])
+	}
+}
+
+func checkMultipleSets(t *testing.T, m map[string]interface{}) {
+	t.Helper()
+	img := m["image"].(map[string]interface{})
+	if img["tag"] != "v1" {
+		t.Errorf("image.tag = %v", img["tag"])
+	}
+	if img["pullPolicy"] != "Always" {
+		t.Errorf("image.pullPolicy = %v", img["pullPolicy"])
+	}
+	if m["replicas"] != "3" {
+		t.Errorf("replicas = %v", m["replicas"])
+	}
+}
+
+func checkEmptyMap(t *testing.T, m map[string]interface{}) {
+	t.Helper()
+	if len(m) != 0 {
+		t.Errorf("expected empty map, got %v", m)
+	}
+}
+
 func TestParseSetValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -83,60 +133,27 @@ func TestParseSetValues(t *testing.T) {
 		{
 			name:  "simple key=val",
 			input: []string{"key=val"},
-			check: func(t *testing.T, m map[string]interface{}) {
-				if m["key"] != "val" {
-					t.Errorf("key = %v", m["key"])
-				}
-			},
+			check: checkSimpleKeyVal,
 		},
 		{
 			name:  "nested key",
-			input: []string{"image.tag=main-stable"},
-			check: func(t *testing.T, m map[string]interface{}) {
-				img, ok := m["image"].(map[string]interface{})
-				if !ok {
-					t.Fatalf("image is not a map: %T", m["image"])
-				}
-				if img["tag"] != "main-stable" {
-					t.Errorf("image.tag = %v", img["tag"])
-				}
-			},
+			input: []string{"image.tag=" + testTagMainStable},
+			check: checkNestedKey,
 		},
 		{
 			name:  "deeply nested",
 			input: []string{"a.b.c=deep"},
-			check: func(t *testing.T, m map[string]interface{}) {
-				a := m["a"].(map[string]interface{})
-				b := a["b"].(map[string]interface{})
-				if b["c"] != "deep" {
-					t.Errorf("a.b.c = %v", b["c"])
-				}
-			},
+			check: checkDeeplyNested,
 		},
 		{
 			name:  "multiple sets",
 			input: []string{"image.tag=v1", "image.pullPolicy=Always", "replicas=3"},
-			check: func(t *testing.T, m map[string]interface{}) {
-				img := m["image"].(map[string]interface{})
-				if img["tag"] != "v1" {
-					t.Errorf("image.tag = %v", img["tag"])
-				}
-				if img["pullPolicy"] != "Always" {
-					t.Errorf("image.pullPolicy = %v", img["pullPolicy"])
-				}
-				if m["replicas"] != "3" {
-					t.Errorf("replicas = %v", m["replicas"])
-				}
-			},
+			check: checkMultipleSets,
 		},
 		{
 			name:  "invalid format skipped",
 			input: []string{"no-equals-sign"},
-			check: func(t *testing.T, m map[string]interface{}) {
-				if len(m) != 0 {
-					t.Errorf("expected empty map, got %v", m)
-				}
-			},
+			check: checkEmptyMap,
 		},
 	}
 
@@ -220,6 +237,35 @@ func TestDeepMerge(t *testing.T) {
 	}
 }
 
+func checkLinearChain(t *testing.T, order []string) {
+	t.Helper()
+	idx := make(map[string]int)
+	for i, name := range order {
+		idx[name] = i
+	}
+	if idx["a"] > idx["b"] || idx["b"] > idx["c"] {
+		t.Errorf("wrong order: %v", order)
+	}
+}
+
+func checkNoDeps(t *testing.T, order []string) {
+	t.Helper()
+	if len(order) != 2 {
+		t.Errorf("order = %v, want 2 items", order)
+	}
+}
+
+func checkDiamondDeps(t *testing.T, order []string) {
+	t.Helper()
+	idx := make(map[string]int)
+	for i, name := range order {
+		idx[name] = i
+	}
+	if idx["a"] > idx["b"] || idx["a"] > idx["c"] || idx["b"] > idx["d"] || idx["c"] > idx["d"] {
+		t.Errorf("wrong order: %v", order)
+	}
+}
+
 func TestTopoSort(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -235,15 +281,7 @@ func TestTopoSort(t *testing.T) {
 				"b": {[]string{"a"}},
 				"a": {nil},
 			},
-			check: func(t *testing.T, order []string) {
-				idx := make(map[string]int)
-				for i, name := range order {
-					idx[name] = i
-				}
-				if idx["a"] > idx["b"] || idx["b"] > idx["c"] {
-					t.Errorf("wrong order: %v", order)
-				}
-			},
+			check: checkLinearChain,
 		},
 		{
 			name: "no deps",
@@ -251,11 +289,7 @@ func TestTopoSort(t *testing.T) {
 				"a": {nil},
 				"b": {nil},
 			},
-			check: func(t *testing.T, order []string) {
-				if len(order) != 2 {
-					t.Errorf("order = %v, want 2 items", order)
-				}
-			},
+			check: checkNoDeps,
 		},
 		{
 			name: "diamond deps",
@@ -265,15 +299,7 @@ func TestTopoSort(t *testing.T) {
 				"c": {[]string{"a"}},
 				"a": {nil},
 			},
-			check: func(t *testing.T, order []string) {
-				idx := make(map[string]int)
-				for i, name := range order {
-					idx[name] = i
-				}
-				if idx["a"] > idx["b"] || idx["a"] > idx["c"] || idx["b"] > idx["d"] || idx["c"] > idx["d"] {
-					t.Errorf("wrong order: %v", order)
-				}
-			},
+			check: checkDiamondDeps,
 		},
 	}
 

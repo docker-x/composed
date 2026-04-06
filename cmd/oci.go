@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const bearerPrefix = "Bearer "
+
 var ociAcceptHeader = strings.Join([]string{
 	"application/vnd.oci.image.index.v1+json",
 	"application/vnd.oci.image.manifest.v1+json",
@@ -51,7 +53,7 @@ func fetchAndClassify(client *http.Client, registry, repo, tag, token string) st
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Accept", ociAcceptHeader)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", bearerPrefix+token)
 	}
 
 	resp, err := client.Do(req)
@@ -95,7 +97,7 @@ func fetchNewestTag(client *http.Client, registry, repo, token string) string {
 	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repo)
 	req, _ := http.NewRequest("GET", url, nil)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", bearerPrefix+token)
 	}
 
 	resp, err := client.Do(req)
@@ -187,7 +189,7 @@ func fetchAnonymousToken(client *http.Client, resp *http.Response, repo string) 
 // parseWWWAuthenticate extracts key=value pairs from a Bearer challenge.
 func parseWWWAuthenticate(header string) map[string]string {
 	params := make(map[string]string)
-	header = strings.TrimPrefix(header, "Bearer ")
+	header = strings.TrimPrefix(header, bearerPrefix)
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)
 		k, v, ok := strings.Cut(part, "=")

@@ -13,50 +13,70 @@ func Merge(project string, fragments ...*compose.File) *compose.File {
 	out.Project = project
 
 	for _, f := range fragments {
-		if f == nil {
-			continue
-		}
-
-		if f.Header != "" {
-			if out.Header != "" {
-				out.Header += "\n"
-			}
-			out.Header += f.Header
-		}
-
-		// Merge services
-		for name, svc := range f.Services {
-			if existing, ok := out.Services[name]; ok {
-				// Merge into existing service
-				mergeService(existing, svc)
-			} else {
-				out.Services[name] = svc
-			}
-		}
-
-		// Union merge volumes
-		for name, vol := range f.Volumes {
-			if _, ok := out.Volumes[name]; !ok {
-				out.Volumes[name] = vol
-			}
-		}
-
-		// Union merge networks
-		for name, net := range f.Networks {
-			if _, ok := out.Networks[name]; !ok {
-				out.Networks[name] = net
-			}
-		}
-
-		// Union merge configs
-		for name, cfg := range f.Configs {
-			if _, ok := out.Configs[name]; !ok {
-				out.Configs[name] = cfg
-			}
-		}
+		mergeFragment(out, f)
 	}
 
 	return out
+}
+
+func mergeFragment(out *compose.File, f *compose.File) {
+	if f == nil {
+		return
+	}
+
+	mergeHeader(out, f)
+	mergeFragmentServices(out, f)
+	mergeFragmentVolumes(out, f)
+	mergeFragmentNetworks(out, f)
+	mergeFragmentConfigs(out, f)
+}
+
+func mergeHeader(out *compose.File, f *compose.File) {
+	if f.Header != "" {
+		if out.Header != "" {
+			out.Header += "\n"
+		}
+		out.Header += f.Header
+	}
+}
+
+func mergeFragmentServices(out *compose.File, f *compose.File) {
+	// Merge services
+	for name, svc := range f.Services {
+		if existing, ok := out.Services[name]; ok {
+			// Merge into existing service
+			mergeService(existing, svc)
+		} else {
+			out.Services[name] = svc
+		}
+	}
+}
+
+func mergeFragmentVolumes(out *compose.File, f *compose.File) {
+	// Union merge volumes
+	for name, vol := range f.Volumes {
+		if _, ok := out.Volumes[name]; !ok {
+			out.Volumes[name] = vol
+		}
+	}
+}
+
+func mergeFragmentNetworks(out *compose.File, f *compose.File) {
+	// Union merge networks
+	for name, net := range f.Networks {
+		if _, ok := out.Networks[name]; !ok {
+			out.Networks[name] = net
+		}
+	}
+}
+
+func mergeFragmentConfigs(out *compose.File, f *compose.File) {
+	// Union merge configs
+	for name, cfg := range f.Configs {
+		if _, ok := out.Configs[name]; !ok {
+			out.Configs[name] = cfg
+		}
+	}
 }
 
 // mergeService merges src into dst. src values override dst for scalars;

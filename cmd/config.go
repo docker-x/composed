@@ -191,52 +191,17 @@ Examples:
 func runConfigAdd(cmd *cobra.Command, args []string) error {
 	addFile = resolveConfig(cmd, addFile)
 
-	var name, source string
-	hasExplicitFlags := addChart != "" || addImage != "" || addCompFile != ""
-
-	switch len(args) {
-	case 2:
-		name, source = args[0], args[1]
-		if hasExplicitFlags {
-			return fmt.Errorf("provide either a positional source or --chart/--image/--compose-file, not both")
-		}
-	case 1:
-		if hasExplicitFlags {
-			name = args[0]
-		} else {
-			source = args[0]
-			name = deriveComponentName(source)
-		}
+	name, source, err := resolveAddArgs(args)
+	if err != nil {
+		return err
 	}
 
-	// If we have a source, auto-detect type
 	if source != "" {
-		switch detectSourceType(source) {
-		case "helm":
-			addChart = source
-		case "compose":
-			addCompFile = source
-		case "image":
-			addImage = source
-		}
+		autoDetectSource(source)
 	}
 
-	// Validate exactly one type
-	flagCount := 0
-	if addChart != "" {
-		flagCount++
-	}
-	if addImage != "" {
-		flagCount++
-	}
-	if addCompFile != "" {
-		flagCount++
-	}
-	if flagCount == 0 {
-		return fmt.Errorf("specify a source: composed add <source>\nor use --chart, --image, or --compose-file")
-	}
-	if flagCount > 1 {
-		return fmt.Errorf("ambiguous: specify only one of --chart, --image, or --compose-file")
+	if err := validateServiceType(); err != nil {
+		return err
 	}
 
 	// Load existing config
@@ -276,6 +241,58 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 
 	svcType := config.ServiceType(&svc)
 	fmt.Fprintf(os.Stderr, "Added %s service %q to %s\n", svcType, name, addFile)
+	return nil
+}
+
+func resolveAddArgs(args []string) (name, source string, err error) {
+	hasExplicitFlags := addChart != "" || addImage != "" || addCompFile != ""
+
+	switch len(args) {
+	case 2:
+		name, source = args[0], args[1]
+		if hasExplicitFlags {
+			return "", "", fmt.Errorf("provide either a positional source or --chart/--image/--compose-file, not both")
+		}
+	case 1:
+		if hasExplicitFlags {
+			name = args[0]
+		} else {
+			source = args[0]
+			name = deriveComponentName(source)
+		}
+	}
+
+	return name, source, nil
+}
+
+func autoDetectSource(source string) {
+	switch detectSourceType(source) {
+	case "helm":
+		addChart = source
+	case "compose":
+		addCompFile = source
+	case "image":
+		addImage = source
+	}
+}
+
+func validateServiceType() error {
+	flagCount := 0
+	if addChart != "" {
+		flagCount++
+	}
+	if addImage != "" {
+		flagCount++
+	}
+	if addCompFile != "" {
+		flagCount++
+	}
+	if flagCount == 0 {
+		return fmt.Errorf("specify a source: composed add <source>\nor use --chart, --image, or --compose-file")
+	}
+	if flagCount > 1 {
+		return fmt.Errorf("ambiguous: specify only one of --chart, --image, or --compose-file")
+	}
 	return nil
 }
 

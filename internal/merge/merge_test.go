@@ -6,9 +6,17 @@ import (
 	"github.com/docker-x/composed/internal/compose"
 )
 
+const (
+	testImageNginx = "nginx:latest"
+	testImageApp   = "app:latest"
+	testImageAppV2 = "app:v2"
+	testPort8080   = "8080:8080"
+	testConfigName = "app-config"
+)
+
 func TestMerge_SingleFragment(t *testing.T) {
 	f := compose.NewFile()
-	f.Services["web"] = compose.NewService("nginx:latest")
+	f.Services["web"] = compose.NewService(testImageNginx)
 	f.Volumes["data"] = &compose.Volume{}
 
 	result := Merge("test", f)
@@ -19,7 +27,7 @@ func TestMerge_SingleFragment(t *testing.T) {
 	if len(result.Services) != 1 {
 		t.Fatalf("Services count = %d, want 1", len(result.Services))
 	}
-	if result.Services["web"].Image != "nginx:latest" {
+	if result.Services["web"].Image != testImageNginx {
 		t.Errorf("Image = %q", result.Services["web"].Image)
 	}
 	if len(result.Volumes) != 1 {
@@ -29,7 +37,7 @@ func TestMerge_SingleFragment(t *testing.T) {
 
 func TestMerge_TwoFragments_DifferentServices(t *testing.T) {
 	f1 := compose.NewFile()
-	f1.Services["web"] = compose.NewService("nginx:latest")
+	f1.Services["web"] = compose.NewService(testImageNginx)
 
 	f2 := compose.NewFile()
 	f2.Services["db"] = compose.NewService("postgres:15")
@@ -39,7 +47,7 @@ func TestMerge_TwoFragments_DifferentServices(t *testing.T) {
 	if len(result.Services) != 2 {
 		t.Fatalf("Services count = %d, want 2", len(result.Services))
 	}
-	if result.Services["web"].Image != "nginx:latest" {
+	if result.Services["web"].Image != testImageNginx {
 		t.Error("missing web service")
 	}
 	if result.Services["db"].Image != "postgres:15" {
@@ -51,11 +59,11 @@ func TestMerge_ConflictingServices_Merged(t *testing.T) {
 	f1 := compose.NewFile()
 	svc1 := compose.NewService("app:v1")
 	svc1.Environment["FOO"] = "bar"
-	svc1.Ports = []string{"8080:8080"}
+	svc1.Ports = []string{testPort8080}
 	f1.Services["app"] = svc1
 
 	f2 := compose.NewFile()
-	svc2 := compose.NewService("app:v2")
+	svc2 := compose.NewService(testImageAppV2)
 	svc2.Environment["BAZ"] = "qux"
 	svc2.Ports = []string{"9090:9090"}
 	f2.Services["app"] = svc2
@@ -63,8 +71,8 @@ func TestMerge_ConflictingServices_Merged(t *testing.T) {
 	result := Merge("test", f1, f2)
 
 	app := result.Services["app"]
-	if app.Image != "app:v2" {
-		t.Errorf("Image = %q, want %q (later wins)", app.Image, "app:v2")
+	if app.Image != testImageAppV2 {
+		t.Errorf("Image = %q, want %q (later wins)", app.Image, testImageAppV2)
 	}
 	if app.Environment["FOO"] != "bar" {
 		t.Error("FOO should be preserved from first fragment")
@@ -79,7 +87,7 @@ func TestMerge_ConflictingServices_Merged(t *testing.T) {
 
 func TestMerge_EnvironmentOverride(t *testing.T) {
 	f1 := compose.NewFile()
-	svc1 := compose.NewService("app:latest")
+	svc1 := compose.NewService(testImageApp)
 	svc1.Environment["KEY"] = "old"
 	f1.Services["app"] = svc1
 
@@ -96,13 +104,13 @@ func TestMerge_EnvironmentOverride(t *testing.T) {
 
 func TestMerge_PortDedup(t *testing.T) {
 	f1 := compose.NewFile()
-	svc1 := compose.NewService("app:latest")
-	svc1.Ports = []string{"8080:8080", "9090:9090"}
+	svc1 := compose.NewService(testImageApp)
+	svc1.Ports = []string{testPort8080, "9090:9090"}
 	f1.Services["app"] = svc1
 
 	f2 := compose.NewFile()
 	svc2 := compose.NewService("")
-	svc2.Ports = []string{"8080:8080", "3000:3000"}
+	svc2.Ports = []string{testPort8080, "3000:3000"}
 	f2.Services["app"] = svc2
 
 	result := Merge("test", f1, f2)
@@ -146,24 +154,24 @@ func TestMerge_NetworkUnion(t *testing.T) {
 
 func TestMerge_ConfigUnion(t *testing.T) {
 	f1 := compose.NewFile()
-	f1.Configs["app-config"] = &compose.Config{Content: "v1"}
+	f1.Configs[testConfigName] = &compose.Config{Content: "v1"}
 
 	f2 := compose.NewFile()
 	f2.Configs["db-config"] = &compose.Config{Content: "v2"}
-	f2.Configs["app-config"] = &compose.Config{Content: "v2-override"} // should not override
+	f2.Configs[testConfigName] = &compose.Config{Content: "v2-override"} // should not override
 
 	result := Merge("test", f1, f2)
 	if len(result.Configs) != 2 {
 		t.Errorf("Configs count = %d, want 2", len(result.Configs))
 	}
-	if result.Configs["app-config"].Content != "v1" {
-		t.Errorf("app-config = %q, want %q (first wins)", result.Configs["app-config"].Content, "v1")
+	if result.Configs[testConfigName].Content != "v1" {
+		t.Errorf("app-config = %q, want %q (first wins)", result.Configs[testConfigName].Content, "v1")
 	}
 }
 
 func TestMerge_NilFragments(t *testing.T) {
 	f1 := compose.NewFile()
-	f1.Services["web"] = compose.NewService("nginx:latest")
+	f1.Services["web"] = compose.NewService(testImageNginx)
 
 	result := Merge("test", nil, f1, nil)
 	if len(result.Services) != 1 {
@@ -173,7 +181,7 @@ func TestMerge_NilFragments(t *testing.T) {
 
 func TestMerge_DependsOnMerge(t *testing.T) {
 	f1 := compose.NewFile()
-	svc1 := compose.NewService("app:latest")
+	svc1 := compose.NewService(testImageApp)
 	svc1.DependsOn["db"] = compose.DependsOnCondition{Condition: "service_healthy"}
 	f1.Services["app"] = svc1
 
@@ -191,7 +199,7 @@ func TestMerge_DependsOnMerge(t *testing.T) {
 
 func TestMerge_LabelsMerge(t *testing.T) {
 	f1 := compose.NewFile()
-	svc1 := compose.NewService("app:latest")
+	svc1 := compose.NewService(testImageApp)
 	svc1.Labels["team"] = "backend"
 	f1.Services["app"] = svc1
 
@@ -220,7 +228,7 @@ func TestMerge_ScalarOverrides(t *testing.T) {
 	f1.Services["app"] = svc1
 
 	f2 := compose.NewFile()
-	svc2 := compose.NewService("app:v2")
+	svc2 := compose.NewService(testImageAppV2)
 	svc2.Restart = "unless-stopped"
 	svc2.Entrypoint = []string{"/new"}
 	svc2.Command = []string{"new-cmd"}
@@ -232,7 +240,7 @@ func TestMerge_ScalarOverrides(t *testing.T) {
 	result := Merge("test", f1, f2)
 	app := result.Services["app"]
 
-	if app.Image != "app:v2" {
+	if app.Image != testImageAppV2 {
 		t.Errorf("Image = %q", app.Image)
 	}
 	if app.Restart != "unless-stopped" {

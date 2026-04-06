@@ -225,20 +225,7 @@ func (c *translateCtx) translatePodSpec(
 	replicas *int32,
 ) {
 	// Init containers → separate services with depends_on
-	initSvcNames := make([]string, 0, len(podSpec.InitContainers))
-	for i := range podSpec.InitContainers {
-		initC := &podSpec.InitContainers[i]
-		initName := fmt.Sprintf("%s-init-%s", baseName, initC.Name)
-		svc := c.translateContainerToService(initC, podSpec)
-		svc.Deploy = &compose.Deploy{
-			RestartPolicy: &compose.RestartPolicy{
-				Condition:   "on-failure",
-				MaxAttempts: 3,
-			},
-		}
-		c.cf.Services[initName] = svc
-		initSvcNames = append(initSvcNames, initName)
-	}
+	initSvcNames := c.translateInitContainers(baseName, podSpec)
 
 	// Main containers
 	for i := range podSpec.Containers {
@@ -260,26 +247,48 @@ func (c *translateCtx) translatePodSpec(
 		}
 
 		// depends_on init containers
-		prev := ""
-		for _, initName := range initSvcNames {
-			if prev != "" {
-				// Chain: each init depends on the previous
-				c.cf.Services[initName].DependsOn[prev] = compose.DependsOnCondition{
-					Condition: "service_completed_successfully",
-				}
-			}
-			prev = initName
-		}
-		if len(initSvcNames) > 0 {
-			svc.DependsOn[initSvcNames[len(initSvcNames)-1]] = compose.DependsOnCondition{
-				Condition: "service_completed_successfully",
-			}
-		}
+		c.chainInitDependencies(svc, initSvcNames)
 
 		// Store pod labels for K8s Service matching
 		c.svcLabels[name] = serializeLabels(podLabels)
 
 		c.cf.Services[name] = svc
+	}
+}
+
+func (c *translateCtx) translateInitContainers(baseName string, podSpec *corev1.PodSpec) []string {
+	initSvcNames := make([]string, 0, len(podSpec.InitContainers))
+	for i := range podSpec.InitContainers {
+		initC := &podSpec.InitContainers[i]
+		initName := fmt.Sprintf("%s-init-%s", baseName, initC.Name)
+		svc := c.translateContainerToService(initC, podSpec)
+		svc.Deploy = &compose.Deploy{
+			RestartPolicy: &compose.RestartPolicy{
+				Condition:   "on-failure",
+				MaxAttempts: 3,
+			},
+		}
+		c.cf.Services[initName] = svc
+		initSvcNames = append(initSvcNames, initName)
+	}
+	return initSvcNames
+}
+
+func (c *translateCtx) chainInitDependencies(svc *compose.Service, initSvcNames []string) {
+	prev := ""
+	for _, initName := range initSvcNames {
+		if prev != "" {
+			// Chain: each init depends on the previous
+			c.cf.Services[initName].DependsOn[prev] = compose.DependsOnCondition{
+				Condition: "service_completed_successfully",
+			}
+		}
+		prev = initName
+	}
+	if len(initSvcNames) > 0 {
+		svc.DependsOn[initSvcNames[len(initSvcNames)-1]] = compose.DependsOnCondition{
+			Condition: "service_completed_successfully",
+		}
 	}
 }
 
@@ -298,6 +307,32 @@ func (c *translateCtx) translateContainerToService(
 		svc.Command = container.Args
 	}
 
+	c.translateContainerEnv(svc, container)
+
+	// Volume mounts
+	for _, vm := range container.VolumeMounts {
+		vol := findVolume(podSpec.Volumes, vm.Name)
+		if vol == nil {
+			continue
+		}
+		c.translateVolumeMount(svc, vm, vol)
+	}
+
+	translateResources(svc, container.Resources)
+
+	// Probes → healthcheck (prefer liveness, fall back to readiness)
+	probe := container.LivenessProbe
+	if probe == nil {
+		probe = container.ReadinessProbe
+	}
+	if probe != nil {
+		svc.Healthcheck = translateProbe(probe, container.Ports)
+	}
+
+	return svc
+}
+
+func (c *translateCtx) translateContainerEnv(svc *compose.Service, container *corev1.Container) {
 	// Inline env vars
 	for _, env := range container.Env {
 		if env.Value != "" {
@@ -316,41 +351,24 @@ func (c *translateCtx) translateContainerToService(
 			c.mergeSecretEnv(svc, ef.SecretRef.Name, ef.Prefix)
 		}
 	}
+}
 
-	// Volume mounts
-	for _, vm := range container.VolumeMounts {
-		vol := findVolume(podSpec.Volumes, vm.Name)
-		if vol == nil {
-			continue
-		}
-		c.translateVolumeMount(svc, vm, vol)
-	}
-
+func translateResources(svc *compose.Service, resources corev1.ResourceRequirements) {
 	// Resource limits
-	if container.Resources.Limits != nil || container.Resources.Requests != nil {
-		res := &compose.Resources{}
-		if container.Resources.Limits != nil {
-			res.Limits = convertResourceSpec(container.Resources.Limits)
-		}
-		if container.Resources.Requests != nil {
-			res.Reservations = convertResourceSpec(container.Resources.Requests)
-		}
-		if svc.Deploy == nil {
-			svc.Deploy = &compose.Deploy{}
-		}
-		svc.Deploy.Resources = res
+	if resources.Limits == nil && resources.Requests == nil {
+		return
 	}
-
-	// Probes → healthcheck (prefer liveness, fall back to readiness)
-	probe := container.LivenessProbe
-	if probe == nil {
-		probe = container.ReadinessProbe
+	res := &compose.Resources{}
+	if resources.Limits != nil {
+		res.Limits = convertResourceSpec(resources.Limits)
 	}
-	if probe != nil {
-		svc.Healthcheck = translateProbe(probe, container.Ports)
+	if resources.Requests != nil {
+		res.Reservations = convertResourceSpec(resources.Requests)
 	}
-
-	return svc
+	if svc.Deploy == nil {
+		svc.Deploy = &compose.Deploy{}
+	}
+	svc.Deploy.Resources = res
 }
 
 // --- Env resolution helpers ---
@@ -540,38 +558,44 @@ func (c *translateCtx) applyServicePorts() {
 			continue
 		}
 
-		svcType := k8sSvc.Spec.Type
-		if svcType == "" {
-			svcType = corev1.ServiceTypeClusterIP
-		}
-
-		for _, port := range k8sSvc.Spec.Ports {
-			targetPort := port.TargetPort.IntValue()
-			if targetPort == 0 {
-				targetPort = int(port.Port)
-			}
-
-			var portStr string
-			switch svcType {
-			case corev1.ServiceTypeClusterIP:
-				portStr = fmt.Sprintf("%d:%d", port.Port, targetPort)
-			case corev1.ServiceTypeNodePort:
-				hostPort := port.NodePort
-				if hostPort == 0 {
-					hostPort = port.Port
-				}
-				portStr = fmt.Sprintf("%d:%d", hostPort, targetPort)
-			case corev1.ServiceTypeLoadBalancer:
-				portStr = fmt.Sprintf("%d:%d", port.Port, targetPort)
-			}
-
-			// Dedup: only add if not already present
-			if portStr != "" && !containsStr(composeSvc.Ports, portStr) {
-				composeSvc.Ports = append(composeSvc.Ports, portStr)
-			}
-		}
+		c.mapServicePorts(composeSvc, k8sSvc)
 
 		c.report.Translated = append(c.report.Translated, ReportEntry{Kind: "Service", Name: k8sSvc.Name})
+	}
+}
+
+func (c *translateCtx) mapServicePorts(composeSvc *compose.Service, k8sSvc *corev1.Service) {
+	svcType := k8sSvc.Spec.Type
+	if svcType == "" {
+		svcType = corev1.ServiceTypeClusterIP
+	}
+	for _, port := range k8sSvc.Spec.Ports {
+		portStr := translateK8sPort(port, svcType)
+		// Dedup: only add if not already present
+		if portStr != "" && !containsStr(composeSvc.Ports, portStr) {
+			composeSvc.Ports = append(composeSvc.Ports, portStr)
+		}
+	}
+}
+
+func translateK8sPort(port corev1.ServicePort, svcType corev1.ServiceType) string {
+	targetPort := port.TargetPort.IntValue()
+	if targetPort == 0 {
+		targetPort = int(port.Port)
+	}
+	switch svcType {
+	case corev1.ServiceTypeClusterIP:
+		return fmt.Sprintf("%d:%d", port.Port, targetPort)
+	case corev1.ServiceTypeNodePort:
+		hostPort := port.NodePort
+		if hostPort == 0 {
+			hostPort = port.Port
+		}
+		return fmt.Sprintf("%d:%d", hostPort, targetPort)
+	case corev1.ServiceTypeLoadBalancer:
+		return fmt.Sprintf("%d:%d", port.Port, targetPort)
+	default:
+		return ""
 	}
 }
 

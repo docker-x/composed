@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+const (
+	testChartBitnamiRedis = "bitnami/redis"
+	testImagePostgres     = "postgres:15-alpine"
+)
+
 func TestServiceType(t *testing.T) {
 	tests := []struct {
 		name string
@@ -14,7 +19,7 @@ func TestServiceType(t *testing.T) {
 	}{
 		{
 			name: "helm service",
-			svc:  Service{XHelm: &HelmExtension{Chart: "bitnami/redis"}},
+			svc:  Service{XHelm: &HelmExtension{Chart: testChartBitnamiRedis}},
 			want: "helm",
 		},
 		{
@@ -24,7 +29,7 @@ func TestServiceType(t *testing.T) {
 		},
 		{
 			name: "image service",
-			svc:  Service{Image: "postgres:15-alpine"},
+			svc:  Service{Image: testImagePostgres},
 			want: "image",
 		},
 		{
@@ -35,7 +40,7 @@ func TestServiceType(t *testing.T) {
 		{
 			name: "helm takes priority over compose",
 			svc: Service{
-				XHelm:        &HelmExtension{Chart: "bitnami/redis"},
+				XHelm:        &HelmExtension{Chart: testChartBitnamiRedis},
 				XComposeFile: "./docker-compose.yaml",
 			},
 			want: "helm",
@@ -49,6 +54,112 @@ func TestServiceType(t *testing.T) {
 				t.Errorf("ServiceType() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// --- TestParse helper functions ---
+
+func checkMinimalConfig(t *testing.T, f *File) {
+	t.Helper()
+	if f.Name != "my-stack" {
+		t.Errorf("Name = %q, want %q", f.Name, "my-stack")
+	}
+	if len(f.Services) != 1 {
+		t.Fatalf("Services count = %d, want 1", len(f.Services))
+	}
+	svc := f.Services["postgres"]
+	if svc.Image != testImagePostgres {
+		t.Errorf("Image = %q, want %q", svc.Image, testImagePostgres)
+	}
+}
+
+func checkHelmExtension(t *testing.T, f *File) {
+	t.Helper()
+	svc := f.Services["redis"]
+	if svc.XHelm == nil {
+		t.Fatal("XHelm is nil")
+	}
+	if svc.XHelm.Chart != testChartBitnamiRedis {
+		t.Errorf("Chart = %q, want %q", svc.XHelm.Chart, testChartBitnamiRedis)
+	}
+	if svc.XHelm.Repo != "https://charts.bitnami.com/bitnami" {
+		t.Errorf("Repo = %q", svc.XHelm.Repo)
+	}
+	if svc.XHelm.Version != "18.x" {
+		t.Errorf("Version = %q", svc.XHelm.Version)
+	}
+	if svc.XHelm.ValuesFile != "./redis-values.yaml" {
+		t.Errorf("ValuesFile = %q", svc.XHelm.ValuesFile)
+	}
+	if v, ok := svc.XHelm.Values["architecture"]; !ok || v != "standalone" {
+		t.Errorf("Values[architecture] = %v", v)
+	}
+}
+
+func checkComposeFile(t *testing.T, f *File) {
+	t.Helper()
+	svc := f.Services["monitoring"]
+	if svc.XComposeFile != "./monitoring/docker-compose.yaml" {
+		t.Errorf("XComposeFile = %q", svc.XComposeFile)
+	}
+}
+
+func checkExports(t *testing.T, f *File) {
+	t.Helper()
+	svc := f.Services["postgres"]
+	if svc.XExports["host"] != "postgres" {
+		t.Errorf("XExports[host] = %q", svc.XExports["host"])
+	}
+	if svc.XExports["password"] != "secret" {
+		t.Errorf("XExports[password] = %q", svc.XExports["password"])
+	}
+}
+
+func checkFullServiceFields(t *testing.T, f *File) {
+	t.Helper()
+	svc := f.Services["app"]
+	if svc.Image != "myapp:latest" {
+		t.Errorf("Image = %q", svc.Image)
+	}
+	if len(svc.Command) != 2 || svc.Command[0] != "serve" {
+		t.Errorf("Command = %v", svc.Command)
+	}
+	if len(svc.Entrypoint) != 2 {
+		t.Errorf("Entrypoint = %v", svc.Entrypoint)
+	}
+	if svc.Environment["FOO"] != "bar" {
+		t.Errorf("Environment[FOO] = %q", svc.Environment["FOO"])
+	}
+	if len(svc.Ports) != 1 || svc.Ports[0] != "8080:8080" {
+		t.Errorf("Ports = %v", svc.Ports)
+	}
+	if len(svc.Volumes) != 1 || svc.Volumes[0] != "data:/data" {
+		t.Errorf("Volumes = %v", svc.Volumes)
+	}
+	if svc.Labels["team"] != "backend" {
+		t.Errorf("Labels = %v", svc.Labels)
+	}
+	if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "postgres" {
+		t.Errorf("DependsOn = %v", svc.DependsOn)
+	}
+	if svc.Restart != "unless-stopped" {
+		t.Errorf("Restart = %q", svc.Restart)
+	}
+	if svc.Healthcheck == nil {
+		t.Fatal("Healthcheck is nil")
+	}
+	if svc.Healthcheck.Retries != 3 {
+		t.Errorf("Healthcheck.Retries = %d", svc.Healthcheck.Retries)
+	}
+}
+
+func checkEmptyConfig(t *testing.T, f *File) {
+	t.Helper()
+	if f.Services == nil {
+		t.Fatal("Services should be initialized, not nil")
+	}
+	if len(f.Services) != 0 {
+		t.Errorf("Services count = %d, want 0", len(f.Services))
 	}
 }
 
@@ -67,18 +178,7 @@ services:
   postgres:
     image: postgres:15-alpine
 `,
-			check: func(t *testing.T, f *File) {
-				if f.Name != "my-stack" {
-					t.Errorf("Name = %q, want %q", f.Name, "my-stack")
-				}
-				if len(f.Services) != 1 {
-					t.Fatalf("Services count = %d, want 1", len(f.Services))
-				}
-				svc := f.Services["postgres"]
-				if svc.Image != "postgres:15-alpine" {
-					t.Errorf("Image = %q, want %q", svc.Image, "postgres:15-alpine")
-				}
-			},
+			check: checkMinimalConfig,
 		},
 		{
 			name: "helm extension parsed",
@@ -94,27 +194,7 @@ services:
         architecture: standalone
       values_file: ./redis-values.yaml
 `,
-			check: func(t *testing.T, f *File) {
-				svc := f.Services["redis"]
-				if svc.XHelm == nil {
-					t.Fatal("XHelm is nil")
-				}
-				if svc.XHelm.Chart != "bitnami/redis" {
-					t.Errorf("Chart = %q, want %q", svc.XHelm.Chart, "bitnami/redis")
-				}
-				if svc.XHelm.Repo != "https://charts.bitnami.com/bitnami" {
-					t.Errorf("Repo = %q", svc.XHelm.Repo)
-				}
-				if svc.XHelm.Version != "18.x" {
-					t.Errorf("Version = %q", svc.XHelm.Version)
-				}
-				if svc.XHelm.ValuesFile != "./redis-values.yaml" {
-					t.Errorf("ValuesFile = %q", svc.XHelm.ValuesFile)
-				}
-				if v, ok := svc.XHelm.Values["architecture"]; !ok || v != "standalone" {
-					t.Errorf("Values[architecture] = %v", v)
-				}
-			},
+			check: checkHelmExtension,
 		},
 		{
 			name: "compose file extension parsed",
@@ -124,12 +204,7 @@ services:
   monitoring:
     x-compose-file: ./monitoring/docker-compose.yaml
 `,
-			check: func(t *testing.T, f *File) {
-				svc := f.Services["monitoring"]
-				if svc.XComposeFile != "./monitoring/docker-compose.yaml" {
-					t.Errorf("XComposeFile = %q", svc.XComposeFile)
-				}
-			},
+			check: checkComposeFile,
 		},
 		{
 			name: "exports parsed",
@@ -142,15 +217,7 @@ services:
       host: postgres
       password: secret
 `,
-			check: func(t *testing.T, f *File) {
-				svc := f.Services["postgres"]
-				if svc.XExports["host"] != "postgres" {
-					t.Errorf("XExports[host] = %q", svc.XExports["host"])
-				}
-				if svc.XExports["password"] != "secret" {
-					t.Errorf("XExports[password] = %q", svc.XExports["password"])
-				}
-			},
+			check: checkExports,
 		},
 		{
 			name: "full service fields",
@@ -186,56 +253,14 @@ services:
       timeout: 5s
       retries: 3
 `,
-			check: func(t *testing.T, f *File) {
-				svc := f.Services["app"]
-				if svc.Image != "myapp:latest" {
-					t.Errorf("Image = %q", svc.Image)
-				}
-				if len(svc.Command) != 2 || svc.Command[0] != "serve" {
-					t.Errorf("Command = %v", svc.Command)
-				}
-				if len(svc.Entrypoint) != 2 {
-					t.Errorf("Entrypoint = %v", svc.Entrypoint)
-				}
-				if svc.Environment["FOO"] != "bar" {
-					t.Errorf("Environment[FOO] = %q", svc.Environment["FOO"])
-				}
-				if len(svc.Ports) != 1 || svc.Ports[0] != "8080:8080" {
-					t.Errorf("Ports = %v", svc.Ports)
-				}
-				if len(svc.Volumes) != 1 || svc.Volumes[0] != "data:/data" {
-					t.Errorf("Volumes = %v", svc.Volumes)
-				}
-				if svc.Labels["team"] != "backend" {
-					t.Errorf("Labels = %v", svc.Labels)
-				}
-				if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "postgres" {
-					t.Errorf("DependsOn = %v", svc.DependsOn)
-				}
-				if svc.Restart != "unless-stopped" {
-					t.Errorf("Restart = %q", svc.Restart)
-				}
-				if svc.Healthcheck == nil {
-					t.Fatal("Healthcheck is nil")
-				}
-				if svc.Healthcheck.Retries != 3 {
-					t.Errorf("Healthcheck.Retries = %d", svc.Healthcheck.Retries)
-				}
-			},
+			check: checkFullServiceFields,
 		},
 		{
 			name: "empty config",
 			input: `
 name: empty
 `,
-			check: func(t *testing.T, f *File) {
-				if f.Services == nil {
-					t.Fatal("Services should be initialized, not nil")
-				}
-				if len(f.Services) != 0 {
-					t.Errorf("Services count = %d, want 0", len(f.Services))
-				}
-			},
+			check: checkEmptyConfig,
 		},
 		{
 			name:    "invalid yaml",
@@ -297,6 +322,52 @@ services:
 	})
 }
 
+// --- TestResolveRefs helper functions ---
+
+func checkEnvVarResolved(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	if app.Environment["DB_HOST"] != "postgres" {
+		t.Errorf("DB_HOST = %q, want %q", app.Environment["DB_HOST"], "postgres")
+	}
+	if app.Environment["DB_PASS"] != "secret" {
+		t.Errorf("DB_PASS = %q, want %q", app.Environment["DB_PASS"], "secret")
+	}
+}
+
+func checkConnectionString(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	want := "postgresql://user:secret@postgres:5432/db"
+	if app.Environment["DATABASE_URL"] != want {
+		t.Errorf("DATABASE_URL = %q, want %q", app.Environment["DATABASE_URL"], want)
+	}
+}
+
+func checkHelmValuesResolved(t *testing.T, f *File) {
+	t.Helper()
+	litellm := f.Services["litellm"]
+	if litellm.XHelm.Values["db_password"] != "secret123" {
+		t.Errorf("Values[db_password] = %v", litellm.XHelm.Values["db_password"])
+	}
+}
+
+func checkNoOpNoRefs(t *testing.T, f *File) {
+	t.Helper()
+	web := f.Services["web"]
+	if web.Environment["PORT"] != "8080" {
+		t.Errorf("PORT = %q", web.Environment["PORT"])
+	}
+}
+
+func checkUnresolvedRef(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	if app.Environment["DB_HOST"] != "${nonexistent.host}" {
+		t.Errorf("DB_HOST = %q, want unresolved placeholder", app.Environment["DB_HOST"])
+	}
+}
+
 func TestResolveRefs(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -321,15 +392,7 @@ services:
       DB_HOST: "${postgres.host}"
       DB_PASS: "${postgres.password}"
 `,
-			check: func(t *testing.T, f *File) {
-				app := f.Services["app"]
-				if app.Environment["DB_HOST"] != "postgres" {
-					t.Errorf("DB_HOST = %q, want %q", app.Environment["DB_HOST"], "postgres")
-				}
-				if app.Environment["DB_PASS"] != "secret" {
-					t.Errorf("DB_PASS = %q, want %q", app.Environment["DB_PASS"], "secret")
-				}
-			},
+			check: checkEnvVarResolved,
 		},
 		{
 			name: "resolve in connection string",
@@ -346,13 +409,7 @@ services:
     environment:
       DATABASE_URL: "postgresql://user:${postgres.password}@${postgres.host}:5432/db"
 `,
-			check: func(t *testing.T, f *File) {
-				app := f.Services["app"]
-				want := "postgresql://user:secret@postgres:5432/db"
-				if app.Environment["DATABASE_URL"] != want {
-					t.Errorf("DATABASE_URL = %q, want %q", app.Environment["DATABASE_URL"], want)
-				}
-			},
+			check: checkConnectionString,
 		},
 		{
 			name: "resolve in helm values",
@@ -369,12 +426,7 @@ services:
       values:
         db_password: "${postgres.password}"
 `,
-			check: func(t *testing.T, f *File) {
-				litellm := f.Services["litellm"]
-				if litellm.XHelm.Values["db_password"] != "secret123" {
-					t.Errorf("Values[db_password] = %v", litellm.XHelm.Values["db_password"])
-				}
-			},
+			check: checkHelmValuesResolved,
 		},
 		{
 			name: "no-op when no refs",
@@ -386,12 +438,7 @@ services:
     environment:
       PORT: "8080"
 `,
-			check: func(t *testing.T, f *File) {
-				web := f.Services["web"]
-				if web.Environment["PORT"] != "8080" {
-					t.Errorf("PORT = %q", web.Environment["PORT"])
-				}
-			},
+			check: checkNoOpNoRefs,
 		},
 		{
 			name: "unresolved ref left as-is",
@@ -403,12 +450,7 @@ services:
     environment:
       DB_HOST: "${nonexistent.host}"
 `,
-			check: func(t *testing.T, f *File) {
-				app := f.Services["app"]
-				if app.Environment["DB_HOST"] != "${nonexistent.host}" {
-					t.Errorf("DB_HOST = %q, want unresolved placeholder", app.Environment["DB_HOST"])
-				}
-			},
+			check: checkUnresolvedRef,
 		},
 	}
 

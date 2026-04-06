@@ -77,71 +77,11 @@ func Parse(data []byte) (*Manifests, error) {
 			continue // skip empty or non-resource docs
 		}
 
-		switch meta.Kind {
-		case "Deployment":
-			obj := &appsv1.Deployment{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (Deployment %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.Deployments = append(m.Deployments, obj)
-
-		case "StatefulSet":
-			obj := &appsv1.StatefulSet{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (StatefulSet %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.StatefulSets = append(m.StatefulSets, obj)
-
-		case "DaemonSet":
-			obj := &appsv1.DaemonSet{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (DaemonSet %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.DaemonSets = append(m.DaemonSets, obj)
-
-		case "Service":
-			obj := &corev1.Service{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (Service %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.Services = append(m.Services, obj)
-
-		case "ConfigMap":
-			obj := &corev1.ConfigMap{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (ConfigMap %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.ConfigMaps = append(m.ConfigMaps, obj)
-
-		case "Secret":
-			obj := &corev1.Secret{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (Secret %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.Secrets = append(m.Secrets, obj)
-
-		case "PersistentVolumeClaim":
-			obj := &corev1.PersistentVolumeClaim{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (PVC %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.PVCs = append(m.PVCs, obj)
-
-		case "Job":
-			obj := &batchv1.Job{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (Job %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.Jobs = append(m.Jobs, obj)
-
-		case "CronJob":
-			obj := &batchv1.CronJob{}
-			if err := unmarshalK8s(jsonData, obj); err != nil {
-				return nil, fmt.Errorf("doc %d (CronJob %s): %w", i, meta.Metadata.Name, err)
-			}
-			m.CronJobs = append(m.CronJobs, obj)
-
-		default:
+		known, err := m.parseResource(meta.Kind, meta.Metadata.Name, jsonData)
+		if err != nil {
+			return nil, fmt.Errorf("doc %d (%s %s): %w", i, meta.Kind, meta.Metadata.Name, err)
+		}
+		if !known {
 			m.Skipped = append(m.Skipped, SkippedResource{
 				Kind:      meta.Kind,
 				Name:      meta.Metadata.Name,
@@ -151,6 +91,77 @@ func Parse(data []byte) (*Manifests, error) {
 	}
 
 	return m, nil
+}
+
+func (m *Manifests) parseResource(kind, name string, jsonData []byte) (bool, error) {
+	switch kind {
+	case "Deployment":
+		obj := &appsv1.Deployment{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.Deployments = append(m.Deployments, obj)
+
+	case "StatefulSet":
+		obj := &appsv1.StatefulSet{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.StatefulSets = append(m.StatefulSets, obj)
+
+	case "DaemonSet":
+		obj := &appsv1.DaemonSet{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.DaemonSets = append(m.DaemonSets, obj)
+
+	case "Service":
+		obj := &corev1.Service{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.Services = append(m.Services, obj)
+
+	case "ConfigMap":
+		obj := &corev1.ConfigMap{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.ConfigMaps = append(m.ConfigMaps, obj)
+
+	case "Secret":
+		obj := &corev1.Secret{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.Secrets = append(m.Secrets, obj)
+
+	case "PersistentVolumeClaim":
+		obj := &corev1.PersistentVolumeClaim{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.PVCs = append(m.PVCs, obj)
+
+	case "Job":
+		obj := &batchv1.Job{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.Jobs = append(m.Jobs, obj)
+
+	case "CronJob":
+		obj := &batchv1.CronJob{}
+		if err := unmarshalK8s(jsonData, obj); err != nil {
+			return false, err
+		}
+		m.CronJobs = append(m.CronJobs, obj)
+
+	default:
+		return false, nil
+	}
+	return true, nil
 }
 
 // splitYAMLDocs splits multi-document YAML on document boundaries using a
