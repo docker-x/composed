@@ -95,7 +95,9 @@ func Emit(f *File) (string, error) {
 	if err := enc.Encode(root); err != nil {
 		return "", fmt.Errorf("yaml encode: %w", err)
 	}
-	enc.Close()
+	if err := enc.Close(); err != nil {
+		return "", fmt.Errorf("yaml close: %w", err)
+	}
 	return buf.String(), nil
 }
 

@@ -96,8 +96,8 @@ func doBuild() error {
 	}
 
 	// 2. Resolve cross-references
-	if err := cfg.ResolveRefs(); err != nil {
-		return fmt.Errorf("resolve refs: %w", err)
+	if refErr := cfg.ResolveRefs(); refErr != nil {
+		return fmt.Errorf("resolve refs: %w", refErr)
 	}
 
 	// 3. Process each service → compose fragment
@@ -111,25 +111,25 @@ func doBuild() error {
 		fmt.Fprintf(os.Stderr, "Processing service %q (type: %s)...\n", name, svcType)
 
 		var frag *compose.File
-		var err error
+		var fragErr error
 
 		switch svcType {
 		case "image":
 			frag = imageToCompose(name, &svc)
 		case "compose":
-			frag, err = composeFragment(name, &svc)
+			frag, fragErr = composeFragment(&svc)
 		case "helm":
-			frag, err = helmToCompose(name, &svc)
+			frag, fragErr = helmToCompose(name, &svc)
 		default:
 			return fmt.Errorf("service %q: unknown type %q", name, svcType)
 		}
-		if err != nil {
-			return fmt.Errorf("service %q: %w", name, err)
+		if fragErr != nil {
+			return fmt.Errorf("service %q: %w", name, fragErr)
 		}
 
 		// Apply cross-service depends_on
 		if len(svc.DependsOn) > 0 && frag != nil {
-			applyDependsOn(frag, name, svc.DependsOn, cfg)
+			applyDependsOn(frag, svc.DependsOn, cfg)
 		}
 
 		fragments = append(fragments, frag)
@@ -213,7 +213,7 @@ func imageToCompose(name string, svc *config.Service) *compose.File {
 }
 
 // composeFragment loads an external compose file.
-func composeFragment(name string, svc *config.Service) (*compose.File, error) {
+func composeFragment(svc *config.Service) (*compose.File, error) {
 	path := svc.XComposeFile
 	if path == "" {
 		return nil, fmt.Errorf("compose service needs x-compose-file")
@@ -319,7 +319,7 @@ func flattenValues(prefix string, m map[string]interface{}) map[string]string {
 }
 
 // applyDependsOn adds depends_on entries from cross-service dependencies.
-func applyDependsOn(frag *compose.File, selfName string, deps []string, cfg *config.File) {
+func applyDependsOn(frag *compose.File, deps []string, cfg *config.File) {
 	for _, depName := range deps {
 		depSvc, ok := cfg.Services[depName]
 		if !ok {
@@ -402,6 +402,7 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 	f := compose.NewFile()
 
 	for name, svc := range raw.Services {
+		svc := svc // avoid rangeValCopy
 		cs := compose.NewService(svc.Image)
 		cs.Ports = svc.Ports
 		cs.Volumes = svc.Volumes

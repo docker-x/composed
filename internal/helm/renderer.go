@@ -39,15 +39,15 @@ func Render(opts RenderOpts) (*k8s.Manifests, error) {
 
 	// If it's a local chart directory, run dependency update first
 	if isLocalChart(chart) {
-		abs, err := filepath.Abs(chart)
-		if err != nil {
-			return nil, fmt.Errorf("resolve chart path: %w", err)
+		absChart, absErr := filepath.Abs(chart)
+		if absErr != nil {
+			return nil, fmt.Errorf("resolve chart path: %w", absErr)
 		}
-		chart = abs
+		chart = absChart
 
-		if err := depUpdate(helmBin, chart); err != nil {
+		if depErr := depUpdate(helmBin, chart); depErr != nil {
 			// Non-fatal: chart may have no dependencies
-			fmt.Fprintf(os.Stderr, "Warning: helm dependency update: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: helm dependency update: %v\n", depErr)
 		}
 	}
 
@@ -83,7 +83,7 @@ func depUpdate(helmBin, chartPath string) error {
 	chartYaml := filepath.Join(chartPath, "Chart.yaml")
 	data, err := os.ReadFile(chartYaml)
 	if err != nil {
-		return nil // No Chart.yaml = no deps to update
+		return err
 	}
 	if !strings.Contains(string(data), "dependencies:") {
 		return nil // No dependencies block

@@ -17,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// Opts controls translation behaviour.
+// Opts controls translation behavior.
 type Opts struct {
 	// Compose project name.
 	Project string
@@ -31,7 +31,7 @@ type Result struct {
 	Report  *Report
 }
 
-// Report summarises what was translated vs skipped.
+// Report summarizes what was translated vs skipped.
 type Report struct {
 	Translated []ReportEntry
 	Skipped    []ReportEntry
@@ -49,19 +49,19 @@ func (r *Report) Print(w io.Writer) {
 	}
 
 	if len(r.Translated) > 0 {
-		fmt.Fprintf(w, "Translated:\n")
+		_, _ = fmt.Fprintf(w, "Translated:\n")
 		for _, e := range r.Translated {
-			fmt.Fprintf(w, "  %s/%s\n", e.Kind, e.Name)
+			_, _ = fmt.Fprintf(w, "  %s/%s\n", e.Kind, e.Name)
 		}
 	}
 	if len(r.Skipped) > 0 {
-		fmt.Fprintf(w, "Skipped:\n")
+		_, _ = fmt.Fprintf(w, "Skipped:\n")
 		for _, e := range r.Skipped {
-			fmt.Fprintf(w, "  %s/%s\n", e.Kind, e.Name)
+			_, _ = fmt.Fprintf(w, "  %s/%s\n", e.Kind, e.Name)
 		}
 	}
 	for _, w2 := range r.Warnings {
-		fmt.Fprintf(w, "Warning: %s\n", w2)
+		_, _ = fmt.Fprintf(w, "Warning: %s\n", w2)
 	}
 }
 
@@ -204,7 +204,7 @@ func (c *translateCtx) translateJobs() {
 		podSpec := job.Spec.Template.Spec
 		name := job.Name
 
-		svc := c.translateContainerToService(name, &podSpec.Containers[0], &podSpec)
+		svc := c.translateContainerToService(&podSpec.Containers[0], &podSpec)
 		svc.Deploy = &compose.Deploy{
 			RestartPolicy: &compose.RestartPolicy{
 				Condition:   "on-failure",
@@ -224,10 +224,11 @@ func (c *translateCtx) translatePodSpec(
 	replicas *int32,
 ) {
 	// Init containers → separate services with depends_on
-	var initSvcNames []string
-	for _, initC := range podSpec.InitContainers {
+	initSvcNames := make([]string, 0, len(podSpec.InitContainers))
+	for i := range podSpec.InitContainers {
+		initC := &podSpec.InitContainers[i]
 		initName := fmt.Sprintf("%s-init-%s", baseName, initC.Name)
-		svc := c.translateContainerToService(initName, &initC, podSpec)
+		svc := c.translateContainerToService(initC, podSpec)
 		svc.Deploy = &compose.Deploy{
 			RestartPolicy: &compose.RestartPolicy{
 				Condition:   "on-failure",
@@ -239,13 +240,14 @@ func (c *translateCtx) translatePodSpec(
 	}
 
 	// Main containers
-	for i, container := range podSpec.Containers {
+	for i := range podSpec.Containers {
+		container := &podSpec.Containers[i]
 		name := baseName
 		if i > 0 {
 			name = fmt.Sprintf("%s-%s", baseName, container.Name)
 		}
 
-		svc := c.translateContainerToService(name, &container, podSpec)
+		svc := c.translateContainerToService(container, podSpec)
 
 		// Replicas
 		if replicas != nil && *replicas != 1 {
@@ -282,7 +284,6 @@ func (c *translateCtx) translatePodSpec(
 
 // translateContainerToService converts a single K8s container into a compose Service.
 func (c *translateCtx) translateContainerToService(
-	name string,
 	container *corev1.Container,
 	podSpec *corev1.PodSpec,
 ) *compose.Service {
@@ -396,26 +397,21 @@ func (c *translateCtx) mergeSecretEnv(svc *compose.Service, secName, prefix stri
 		fmt.Sprintf("Secret %q values inlined as plaintext in compose environment", secName))
 
 	for k, v := range sec.Data {
-		decoded, err := base64Decode(v)
-		if err == nil {
-			svc.Environment[prefix+k] = decoded
-		} else {
-			svc.Environment[prefix+k] = string(v)
-		}
+		svc.Environment[prefix+k] = base64Decode(v)
 	}
 	for k, v := range sec.StringData {
 		svc.Environment[prefix+k] = v
 	}
 }
 
-func base64Decode(data []byte) (string, error) {
+func base64Decode(data []byte) string {
 	// K8s secret .data is already decoded by the API types, but if it comes
 	// from raw YAML it might still be base64-encoded.
 	decoded, err := base64.StdEncoding.DecodeString(string(data))
 	if err != nil {
-		return string(data), nil // return as-is
+		return string(data) // return as-is
 	}
-	return string(decoded), nil
+	return string(decoded)
 }
 
 // --- Volume mount translation ---
@@ -608,9 +604,10 @@ func (c *translateCtx) findServiceTarget(selector map[string]string) string {
 func translateProbe(probe *corev1.Probe, containerPorts []corev1.ContainerPort) *compose.Healthcheck {
 	hc := &compose.Healthcheck{}
 
-	if probe.Exec != nil {
+	switch {
+	case probe.Exec != nil:
 		hc.Test = append([]string{"CMD"}, probe.Exec.Command...)
-	} else if probe.HTTPGet != nil {
+	case probe.HTTPGet != nil:
 		port := resolvePort(probe.HTTPGet.Port, containerPorts)
 		path := probe.HTTPGet.Path
 		if path == "" {
@@ -624,7 +621,7 @@ func translateProbe(probe *corev1.Probe, containerPorts []corev1.ContainerPort) 
 		// Use python urllib (available in most images) with wget/curl fallback
 		hc.Test = []string{"CMD-SHELL",
 			fmt.Sprintf("python -c \"import urllib.request; urllib.request.urlopen('%s')\" 2>/dev/null || wget -q --spider %s || curl -sf %s > /dev/null", url, url, url)}
-	} else if probe.TCPSocket != nil {
+	case probe.TCPSocket != nil:
 		port := resolvePort(probe.TCPSocket.Port, containerPorts)
 		hc.Test = []string{"CMD", "sh", "-c",
 			fmt.Sprintf("cat < /dev/tcp/localhost/%s", port)}

@@ -57,11 +57,11 @@ func fetchAndClassify(client *http.Client, registry, repo, tag, token string) st
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		return ""
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -80,7 +80,7 @@ func getRegistryToken(client *http.Client, registry, repo string) string {
 	if err != nil {
 		return ""
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		return "" // no auth needed
@@ -101,11 +101,11 @@ func fetchNewestTag(client *http.Client, registry, repo, token string) string {
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		return ""
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Tags []string `json:"tags"`
@@ -165,11 +165,11 @@ func fetchAnonymousToken(client *http.Client, resp *http.Response, repo string) 
 	tokenResp, err := client.Get(tokenURL)
 	if err != nil || tokenResp.StatusCode != http.StatusOK {
 		if tokenResp != nil {
-			tokenResp.Body.Close()
+			_ = tokenResp.Body.Close()
 		}
 		return ""
 	}
-	defer tokenResp.Body.Close()
+	defer func() { _ = tokenResp.Body.Close() }()
 
 	var result struct {
 		Token       string `json:"token"`

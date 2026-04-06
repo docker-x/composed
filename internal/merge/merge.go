@@ -12,15 +12,16 @@ func Merge(project string, fragments ...*compose.File) *compose.File {
 	out := compose.NewFile()
 	out.Project = project
 
-	var headers []string
-
 	for _, f := range fragments {
 		if f == nil {
 			continue
 		}
 
 		if f.Header != "" {
-			headers = append(headers, f.Header)
+			if out.Header != "" {
+				out.Header += "\n"
+			}
+			out.Header += f.Header
 		}
 
 		// Merge services

@@ -107,7 +107,8 @@ func (f *File) ResolveRefs() error {
 	}
 
 	// Resolve in all services
-	for name, svc := range f.Services {
+	for name := range f.Services {
+		svc := f.Services[name]
 		if svc.Environment != nil {
 			for k, v := range svc.Environment {
 				svc.Environment[k] = resolveString(v, exports)
