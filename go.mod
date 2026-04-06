@@ -2,7 +2,7 @@ module github.com/docker-x/composed
 
 go 1.22.0
 
-toolchain go1.22.5
+toolchain go1.23.8
 
 require (
 	github.com/spf13/cobra v1.10.2
