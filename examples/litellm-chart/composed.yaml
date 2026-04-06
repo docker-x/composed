@@ -1,0 +1,6 @@
+name: litellm-chart
+
+services:
+  litellm-helm:
+    x-helm:
+      chart: oci://docker.litellm.ai/berriai/litellm-helm

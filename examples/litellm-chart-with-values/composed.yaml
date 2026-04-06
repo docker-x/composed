@@ -1,0 +1,7 @@
+name: litellm-chart-with-values
+
+services:
+  litellm-helm:
+    x-helm:
+      chart: oci://docker.litellm.ai/berriai/litellm-helm
+      values_file: litellm-helm.values.yaml

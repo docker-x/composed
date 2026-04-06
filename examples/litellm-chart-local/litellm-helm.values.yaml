@@ -1,0 +1,11 @@
+# Overrides for litellm-helm subchart
+# Full list of options: helm show values oci://docker.litellm.ai/berriai/litellm-helm
+
+litellm-helm:
+  image:
+    tag: main-stable
+
+  masterkey: sk-1234
+
+  db:
+    deployStandalone: true

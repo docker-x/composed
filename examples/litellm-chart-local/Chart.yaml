@@ -1,0 +1,10 @@
+apiVersion: v2
+name: litellm-local
+description: Local wrapper chart for LiteLLM
+version: 0.1.0
+type: application
+
+dependencies:
+  - name: litellm-helm
+    version: "1.82.3"
+    repository: "oci://docker.litellm.ai/berriai"

@@ -1,0 +1,475 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestServiceType(t *testing.T) {
+	tests := []struct {
+		name string
+		svc  Service
+		want string
+	}{
+		{
+			name: "helm service",
+			svc:  Service{XHelm: &HelmExtension{Chart: "bitnami/redis"}},
+			want: "helm",
+		},
+		{
+			name: "compose service",
+			svc:  Service{XComposeFile: "./docker-compose.yaml"},
+			want: "compose",
+		},
+		{
+			name: "image service",
+			svc:  Service{Image: "postgres:15-alpine"},
+			want: "image",
+		},
+		{
+			name: "empty service defaults to image",
+			svc:  Service{},
+			want: "image",
+		},
+		{
+			name: "helm takes priority over compose",
+			svc: Service{
+				XHelm:        &HelmExtension{Chart: "bitnami/redis"},
+				XComposeFile: "./docker-compose.yaml",
+			},
+			want: "helm",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ServiceType(&tt.svc)
+			if got != tt.want {
+				t.Errorf("ServiceType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParse(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		check   func(t *testing.T, f *File)
+	}{
+		{
+			name: "minimal config",
+			input: `
+name: my-stack
+services:
+  postgres:
+    image: postgres:15-alpine
+`,
+			check: func(t *testing.T, f *File) {
+				if f.Name != "my-stack" {
+					t.Errorf("Name = %q, want %q", f.Name, "my-stack")
+				}
+				if len(f.Services) != 1 {
+					t.Fatalf("Services count = %d, want 1", len(f.Services))
+				}
+				svc := f.Services["postgres"]
+				if svc.Image != "postgres:15-alpine" {
+					t.Errorf("Image = %q, want %q", svc.Image, "postgres:15-alpine")
+				}
+			},
+		},
+		{
+			name: "helm extension parsed",
+			input: `
+name: test
+services:
+  redis:
+    x-helm:
+      chart: bitnami/redis
+      repo: https://charts.bitnami.com/bitnami
+      version: "18.x"
+      values:
+        architecture: standalone
+      values_file: ./redis-values.yaml
+`,
+			check: func(t *testing.T, f *File) {
+				svc := f.Services["redis"]
+				if svc.XHelm == nil {
+					t.Fatal("XHelm is nil")
+				}
+				if svc.XHelm.Chart != "bitnami/redis" {
+					t.Errorf("Chart = %q, want %q", svc.XHelm.Chart, "bitnami/redis")
+				}
+				if svc.XHelm.Repo != "https://charts.bitnami.com/bitnami" {
+					t.Errorf("Repo = %q", svc.XHelm.Repo)
+				}
+				if svc.XHelm.Version != "18.x" {
+					t.Errorf("Version = %q", svc.XHelm.Version)
+				}
+				if svc.XHelm.ValuesFile != "./redis-values.yaml" {
+					t.Errorf("ValuesFile = %q", svc.XHelm.ValuesFile)
+				}
+				if v, ok := svc.XHelm.Values["architecture"]; !ok || v != "standalone" {
+					t.Errorf("Values[architecture] = %v", v)
+				}
+			},
+		},
+		{
+			name: "compose file extension parsed",
+			input: `
+name: test
+services:
+  monitoring:
+    x-compose-file: ./monitoring/docker-compose.yaml
+`,
+			check: func(t *testing.T, f *File) {
+				svc := f.Services["monitoring"]
+				if svc.XComposeFile != "./monitoring/docker-compose.yaml" {
+					t.Errorf("XComposeFile = %q", svc.XComposeFile)
+				}
+			},
+		},
+		{
+			name: "exports parsed",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    x-exports:
+      host: postgres
+      password: secret
+`,
+			check: func(t *testing.T, f *File) {
+				svc := f.Services["postgres"]
+				if svc.XExports["host"] != "postgres" {
+					t.Errorf("XExports[host] = %q", svc.XExports["host"])
+				}
+				if svc.XExports["password"] != "secret" {
+					t.Errorf("XExports[password] = %q", svc.XExports["password"])
+				}
+			},
+		},
+		{
+			name: "full service fields",
+			input: `
+name: test
+services:
+  app:
+    image: myapp:latest
+    command:
+      - serve
+      - --port=8080
+    entrypoint:
+      - /bin/sh
+      - -c
+    environment:
+      FOO: bar
+    ports:
+      - "8080:8080"
+    volumes:
+      - data:/data
+    labels:
+      team: backend
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8080/health
+      interval: 10s
+      timeout: 5s
+      retries: 3
+`,
+			check: func(t *testing.T, f *File) {
+				svc := f.Services["app"]
+				if svc.Image != "myapp:latest" {
+					t.Errorf("Image = %q", svc.Image)
+				}
+				if len(svc.Command) != 2 || svc.Command[0] != "serve" {
+					t.Errorf("Command = %v", svc.Command)
+				}
+				if len(svc.Entrypoint) != 2 {
+					t.Errorf("Entrypoint = %v", svc.Entrypoint)
+				}
+				if svc.Environment["FOO"] != "bar" {
+					t.Errorf("Environment[FOO] = %q", svc.Environment["FOO"])
+				}
+				if len(svc.Ports) != 1 || svc.Ports[0] != "8080:8080" {
+					t.Errorf("Ports = %v", svc.Ports)
+				}
+				if len(svc.Volumes) != 1 || svc.Volumes[0] != "data:/data" {
+					t.Errorf("Volumes = %v", svc.Volumes)
+				}
+				if svc.Labels["team"] != "backend" {
+					t.Errorf("Labels = %v", svc.Labels)
+				}
+				if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "postgres" {
+					t.Errorf("DependsOn = %v", svc.DependsOn)
+				}
+				if svc.Restart != "unless-stopped" {
+					t.Errorf("Restart = %q", svc.Restart)
+				}
+				if svc.Healthcheck == nil {
+					t.Fatal("Healthcheck is nil")
+				}
+				if svc.Healthcheck.Retries != 3 {
+					t.Errorf("Healthcheck.Retries = %d", svc.Healthcheck.Retries)
+				}
+			},
+		},
+		{
+			name: "empty config",
+			input: `
+name: empty
+`,
+			check: func(t *testing.T, f *File) {
+				if f.Services == nil {
+					t.Fatal("Services should be initialized, not nil")
+				}
+				if len(f.Services) != 0 {
+					t.Errorf("Services count = %d, want 0", len(f.Services))
+				}
+			},
+		},
+		{
+			name:    "invalid yaml",
+			input:   `[invalid`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := Parse([]byte(tt.input))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, f)
+			}
+		})
+	}
+}
+
+func TestLoad(t *testing.T) {
+	t.Run("valid file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "composed.yaml")
+		err := os.WriteFile(path, []byte(`
+name: test
+services:
+  web:
+    image: nginx:latest
+`), 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		f, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if f.Name != "test" {
+			t.Errorf("Name = %q, want %q", f.Name, "test")
+		}
+		if f.Services["web"].Image != "nginx:latest" {
+			t.Errorf("Image = %q", f.Services["web"].Image)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		_, err := Load("/nonexistent/composed.yaml")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+}
+
+func TestResolveRefs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		check func(t *testing.T, f *File)
+	}{
+		{
+			name: "resolve env var reference",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+    x-exports:
+      host: postgres
+      password: secret
+  app:
+    image: myapp:latest
+    environment:
+      DB_HOST: "${postgres.host}"
+      DB_PASS: "${postgres.password}"
+`,
+			check: func(t *testing.T, f *File) {
+				app := f.Services["app"]
+				if app.Environment["DB_HOST"] != "postgres" {
+					t.Errorf("DB_HOST = %q, want %q", app.Environment["DB_HOST"], "postgres")
+				}
+				if app.Environment["DB_PASS"] != "secret" {
+					t.Errorf("DB_PASS = %q, want %q", app.Environment["DB_PASS"], "secret")
+				}
+			},
+		},
+		{
+			name: "resolve in connection string",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    x-exports:
+      host: postgres
+      password: secret
+  app:
+    image: myapp:latest
+    environment:
+      DATABASE_URL: "postgresql://user:${postgres.password}@${postgres.host}:5432/db"
+`,
+			check: func(t *testing.T, f *File) {
+				app := f.Services["app"]
+				want := "postgresql://user:secret@postgres:5432/db"
+				if app.Environment["DATABASE_URL"] != want {
+					t.Errorf("DATABASE_URL = %q, want %q", app.Environment["DATABASE_URL"], want)
+				}
+			},
+		},
+		{
+			name: "resolve in helm values",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    x-exports:
+      password: secret123
+  litellm:
+    x-helm:
+      chart: litellm
+      values:
+        db_password: "${postgres.password}"
+`,
+			check: func(t *testing.T, f *File) {
+				litellm := f.Services["litellm"]
+				if litellm.XHelm.Values["db_password"] != "secret123" {
+					t.Errorf("Values[db_password] = %v", litellm.XHelm.Values["db_password"])
+				}
+			},
+		},
+		{
+			name: "no-op when no refs",
+			input: `
+name: test
+services:
+  web:
+    image: nginx
+    environment:
+      PORT: "8080"
+`,
+			check: func(t *testing.T, f *File) {
+				web := f.Services["web"]
+				if web.Environment["PORT"] != "8080" {
+					t.Errorf("PORT = %q", web.Environment["PORT"])
+				}
+			},
+		},
+		{
+			name: "unresolved ref left as-is",
+			input: `
+name: test
+services:
+  app:
+    image: myapp
+    environment:
+      DB_HOST: "${nonexistent.host}"
+`,
+			check: func(t *testing.T, f *File) {
+				app := f.Services["app"]
+				if app.Environment["DB_HOST"] != "${nonexistent.host}" {
+					t.Errorf("DB_HOST = %q, want unresolved placeholder", app.Environment["DB_HOST"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := Parse([]byte(tt.input))
+			if err != nil {
+				t.Fatalf("Parse error: %v", err)
+			}
+			if err := f.ResolveRefs(); err != nil {
+				t.Fatalf("ResolveRefs error: %v", err)
+			}
+			tt.check(t, f)
+		})
+	}
+}
+
+func TestIndexOf(t *testing.T) {
+	tests := []struct {
+		s, sub string
+		want   int
+	}{
+		{"hello world", "world", 6},
+		{"hello", "xyz", -1},
+		{"", "a", -1},
+		{"abc", "", 0},
+		{"${foo.bar}", "${foo.bar}", 0},
+		{"prefix${foo.bar}suffix", "${foo.bar}", 6},
+	}
+	for _, tt := range tests {
+		got := indexOf(tt.s, tt.sub)
+		if got != tt.want {
+			t.Errorf("indexOf(%q, %q) = %d, want %d", tt.s, tt.sub, got, tt.want)
+		}
+	}
+}
+
+func TestResolveMap(t *testing.T) {
+	exports := map[string]string{
+		"db.host":     "localhost",
+		"db.password": "secret",
+	}
+
+	input := map[string]interface{}{
+		"connection": "${db.host}",
+		"nested": map[string]interface{}{
+			"pass": "${db.password}",
+			"port": 5432,
+		},
+	}
+
+	result := resolveMap(input, exports)
+
+	if result["connection"] != "localhost" {
+		t.Errorf("connection = %v", result["connection"])
+	}
+	nested := result["nested"].(map[string]interface{})
+	if nested["pass"] != "secret" {
+		t.Errorf("nested.pass = %v", nested["pass"])
+	}
+	if nested["port"] != 5432 {
+		t.Errorf("nested.port = %v (should be unchanged)", nested["port"])
+	}
+}
