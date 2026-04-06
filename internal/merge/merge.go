@@ -102,16 +102,25 @@ func mergeService(dst, src *compose.Service) {
 	}
 
 	// Merge environment (src wins on conflict)
+	if dst.Environment == nil {
+		dst.Environment = make(map[string]string)
+	}
 	for k, v := range src.Environment {
 		dst.Environment[k] = v
 	}
 
 	// Merge labels
+	if dst.Labels == nil {
+		dst.Labels = make(map[string]string)
+	}
 	for k, v := range src.Labels {
 		dst.Labels[k] = v
 	}
 
 	// Merge depends_on
+	if dst.DependsOn == nil {
+		dst.DependsOn = make(map[string]compose.DependsOnCondition)
+	}
 	for k, v := range src.DependsOn {
 		dst.DependsOn[k] = v
 	}

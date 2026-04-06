@@ -98,7 +98,7 @@ func scaffoldHelmValues() error {
 
 		fmt.Fprintf(os.Stderr, "  %s: fetching default values from %s ...\n", name, svc.XHelm.Chart)
 
-		out, err := helmShowValues(svc.XHelm.Chart)
+		out, err := helmShowValues(svc.XHelm)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: helm show values failed: %v, skipping\n", name, err)
 			continue
@@ -130,8 +130,15 @@ func scaffoldHelmValues() error {
 }
 
 // helmShowValues runs `helm show values <chart>` and returns the output.
-func helmShowValues(chart string) ([]byte, error) {
-	cmd := exec.Command("helm", "show", "values", chart)
+func helmShowValues(h *config.HelmExtension) ([]byte, error) {
+	args := []string{"show", "values", h.Chart}
+	if h.Repo != "" {
+		args = append(args, "--repo", h.Repo)
+	}
+	if h.Version != "" {
+		args = append(args, "--version", h.Version)
+	}
+	cmd := exec.Command("helm", args...)
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
 }
@@ -200,8 +207,8 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 		autoDetectSource(source)
 	}
 
-	if err := validateServiceType(); err != nil {
-		return err
+	if verr := validateServiceType(); verr != nil {
+		return verr
 	}
 
 	// Load existing config

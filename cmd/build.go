@@ -212,7 +212,11 @@ func imageToCompose(name string, svc *config.Service) *compose.File {
 			Retries:  svc.Healthcheck.Retries,
 		}
 	}
-	cs.Restart = "unless-stopped"
+	if svc.Restart != "" {
+		cs.Restart = svc.Restart
+	} else {
+		cs.Restart = "unless-stopped"
+	}
 	f.Services[name] = cs
 
 	// Auto-create named volumes

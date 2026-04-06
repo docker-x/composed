@@ -91,8 +91,9 @@ func getRegistryToken(client *http.Client, registry, repo string) string {
 	return fetchAnonymousToken(client, resp, repo)
 }
 
-// fetchNewestTag retrieves the tag list and returns the last one
-// (registries typically return tags in chronological/version order).
+// fetchNewestTag retrieves the tag list and returns the last one.
+// NOTE: OCI Distribution Spec does not guarantee tag ordering; this is
+// a best-effort fallback when no explicit tag is provided.
 func fetchNewestTag(client *http.Client, registry, repo, token string) string {
 	url := fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repo)
 	req, _ := http.NewRequest("GET", url, nil)

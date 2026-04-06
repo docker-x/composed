@@ -205,6 +205,9 @@ func (c *translateCtx) translateJobs() {
 		podSpec := job.Spec.Template.Spec
 		name := job.Name
 
+		if len(podSpec.Containers) == 0 {
+			continue
+		}
 		svc := c.translateContainerToService(&podSpec.Containers[0], &podSpec)
 		svc.Deploy = &compose.Deploy{
 			RestartPolicy: &compose.RestartPolicy{
@@ -634,7 +637,7 @@ func translateProbe(probe *corev1.Probe, containerPorts []corev1.ContainerPort) 
 		}
 		url := fmt.Sprintf("%s://localhost:%s%s", scheme, port, path)
 		// Use CMD form (not CMD-SHELL) to avoid shell injection from untrusted paths
-		hc.Test = []string{"CMD", "curl", "-fsS", url}
+		hc.Test = []string{"CMD", "wget", "-q", "--spider", url}
 	case probe.TCPSocket != nil:
 		port := resolvePort(probe.TCPSocket.Port, containerPorts)
 		hc.Test = []string{"CMD", "sh", "-c",
@@ -728,12 +731,16 @@ func containsStr(slice []string, s string) bool {
 
 // labelsMatch checks if `selector` labels are a subset of `pod` labels.
 func labelsMatch(selector, pod string) bool {
-	if selector == "" {
+	if selector == "" || pod == "" {
 		return false
 	}
-	selectorParts := strings.Split(selector, ",")
-	for _, sp := range selectorParts {
-		if !strings.Contains(pod, sp) {
+	podParts := strings.Split(pod, ",")
+	podSet := make(map[string]struct{}, len(podParts))
+	for _, p := range podParts {
+		podSet[p] = struct{}{}
+	}
+	for _, sp := range strings.Split(selector, ",") {
+		if _, ok := podSet[sp]; !ok {
 			return false
 		}
 	}

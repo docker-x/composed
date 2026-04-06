@@ -69,8 +69,8 @@ func Parse(data []byte) (*Manifests, error) {
 				Namespace string `json:"namespace"`
 			} `json:"metadata"`
 		}
-		if err := json.Unmarshal(jsonData, &meta); err != nil {
-			return nil, fmt.Errorf("doc %d: unmarshal meta: %w", i, err)
+		if uerr := json.Unmarshal(jsonData, &meta); uerr != nil {
+			return nil, fmt.Errorf("doc %d: unmarshal meta: %w", i, uerr)
 		}
 
 		if meta.Kind == "" {
@@ -93,7 +93,7 @@ func Parse(data []byte) (*Manifests, error) {
 	return m, nil
 }
 
-func (m *Manifests) parseResource(kind, name string, jsonData []byte) (bool, error) {
+func (m *Manifests) parseResource(kind, _ string, jsonData []byte) (bool, error) {
 	switch kind {
 	case "Deployment":
 		obj := &appsv1.Deployment{}
