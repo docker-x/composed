@@ -11,6 +11,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -128,20 +129,9 @@ func resolveString(s string, exports map[string]string) string {
 	result := s
 	for key, val := range exports {
 		placeholder := "${" + key + "}"
-		if idx := indexOf(result, placeholder); idx >= 0 {
-			result = result[:idx] + val + result[idx+len(placeholder):]
-		}
+		result = strings.ReplaceAll(result, placeholder, val)
 	}
 	return result
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 func resolveMap(m map[string]interface{}, exports map[string]string) map[string]interface{} {

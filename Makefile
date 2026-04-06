@@ -1,4 +1,4 @@
-.PHONY: setup fmt vet test lint build
+.PHONY: setup fmt vet test cover lint build
 
 ## First-time setup: install git hooks
 setup:

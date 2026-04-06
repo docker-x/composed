@@ -2,7 +2,6 @@
 package translate
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -399,21 +398,11 @@ func (c *translateCtx) mergeSecretEnv(svc *compose.Service, secName, prefix stri
 		fmt.Sprintf("Secret %q values inlined as plaintext in compose environment", secName))
 
 	for k, v := range sec.Data {
-		svc.Environment[prefix+k] = base64Decode(v)
+		svc.Environment[prefix+k] = string(v)
 	}
 	for k, v := range sec.StringData {
 		svc.Environment[prefix+k] = v
 	}
-}
-
-func base64Decode(data []byte) string {
-	// K8s secret .data is already decoded by the API types, but if it comes
-	// from raw YAML it might still be base64-encoded.
-	decoded, err := base64.StdEncoding.DecodeString(string(data))
-	if err != nil {
-		return string(data) // return as-is
-	}
-	return string(decoded)
 }
 
 // --- Volume mount translation ---
@@ -620,9 +609,8 @@ func translateProbe(probe *corev1.Probe, containerPorts []corev1.ContainerPort) 
 			scheme = "http"
 		}
 		url := fmt.Sprintf("%s://localhost:%s%s", scheme, port, path)
-		// Use python urllib (available in most images) with wget/curl fallback
-		hc.Test = []string{"CMD-SHELL",
-			fmt.Sprintf("python -c \"import urllib.request; urllib.request.urlopen('%s')\" 2>/dev/null || wget -q --spider %s || curl -sf %s > /dev/null", url, url, url)}
+		// Use CMD form (not CMD-SHELL) to avoid shell injection from untrusted paths
+		hc.Test = []string{"CMD", "curl", "-fsS", url}
 	case probe.TCPSocket != nil:
 		port := resolvePort(probe.TCPSocket.Port, containerPorts)
 		hc.Test = []string{"CMD", "sh", "-c",

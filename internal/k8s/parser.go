@@ -5,13 +5,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	sigyaml "sigs.k8s.io/yaml"
+
+	goyaml "gopkg.in/yaml.v3"
 )
 
 // Manifests holds all parsed K8s resources, bucketed by kind.
@@ -148,25 +149,28 @@ func Parse(data []byte) (*Manifests, error) {
 	return m, nil
 }
 
-// splitYAMLDocs splits multi-document YAML on "---" boundaries.
+// splitYAMLDocs splits multi-document YAML on document boundaries using a
+// proper YAML decoder, which correctly handles "---" inside block scalars.
 func splitYAMLDocs(data []byte) [][]byte {
 	var docs [][]byte
-	reader := bytes.NewReader(data)
-	scanner := io.Reader(reader)
-
-	// Simple approach: split on "\n---" lines
-	raw := bytes.Split(data, []byte("\n---"))
-	for _, chunk := range raw {
-		chunk = bytes.TrimSpace(chunk)
-		// Handle leading "---" at start of file
-		chunk = bytes.TrimPrefix(chunk, []byte("---"))
-		chunk = bytes.TrimSpace(chunk)
-		if len(chunk) > 0 {
-			docs = append(docs, chunk)
+	dec := goyaml.NewDecoder(bytes.NewReader(data))
+	for {
+		var doc interface{}
+		if err := dec.Decode(&doc); err != nil {
+			break
+		}
+		if doc == nil {
+			continue
+		}
+		out, err := goyaml.Marshal(doc)
+		if err != nil {
+			continue
+		}
+		out = bytes.TrimSpace(out)
+		if len(out) > 0 {
+			docs = append(docs, out)
 		}
 	}
-
-	_ = scanner // suppress unused warning
 	return docs
 }
 

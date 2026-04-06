@@ -25,6 +25,6 @@ appVersion: "1.16.0"
 
 
 dependencies:
-  - name: litellm    
-    version: 1.82.3
-    repository: "oci://docker.litellm.ai/berriai/litellm-helm"
+  - name: litellm-helm
+    version: "1.82.3"
+    repository: "oci://docker.litellm.ai/berriai"
