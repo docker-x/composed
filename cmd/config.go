@@ -138,7 +138,7 @@ func helmShowValues(h *config.HelmExtension) ([]byte, error) {
 	if h.Version != "" {
 		args = append(args, "--version", h.Version)
 	}
-	cmd := exec.Command("helm", args...)
+	cmd := exec.Command("helm", args...) //nolint:gosec // helm must be in PATH
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
 }

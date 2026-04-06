@@ -527,7 +527,7 @@ func toStringSlice(v interface{}) []string {
 
 func dockerCompose(args ...string) error {
 	allArgs := append([]string{"-f", buildOutput}, args...)
-	cmd := exec.Command("docker", append([]string{"compose"}, allArgs...)...)
+	cmd := exec.Command("docker", append([]string{"compose"}, allArgs...)...) //nolint:gosec // docker must be in PATH
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
