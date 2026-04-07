@@ -526,8 +526,12 @@ func toStringSlice(v interface{}) []string {
 }
 
 func dockerCompose(args ...string) error {
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		return fmt.Errorf("docker not found in PATH: %w", err)
+	}
 	allArgs := append([]string{"-f", buildOutput}, args...)
-	cmd := exec.Command("docker", append([]string{"compose"}, allArgs...)...) //nolint:gosec // docker must be in PATH
+	cmd := exec.Command(dockerPath, append([]string{"compose"}, allArgs...)...) //nolint:gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

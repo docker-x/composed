@@ -131,6 +131,10 @@ func scaffoldHelmValues() error {
 
 // helmShowValues runs `helm show values <chart>` and returns the output.
 func helmShowValues(h *config.HelmExtension) ([]byte, error) {
+	helmPath, err := exec.LookPath("helm")
+	if err != nil {
+		return nil, fmt.Errorf("helm not found in PATH: %w", err)
+	}
 	args := []string{"show", "values", h.Chart}
 	if h.Repo != "" {
 		args = append(args, "--repo", h.Repo)
@@ -138,7 +142,7 @@ func helmShowValues(h *config.HelmExtension) ([]byte, error) {
 	if h.Version != "" {
 		args = append(args, "--version", h.Version)
 	}
-	cmd := exec.Command("helm", args...) //nolint:gosec // helm must be in PATH
+	cmd := exec.Command(helmPath, args...) //nolint:gosec
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
 }
