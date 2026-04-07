@@ -6,11 +6,8 @@ const config: Config = {
   tagline: 'Compose anything into a Docker Compose file',
   favicon: 'img/favicon.ico',
 
-  url: 'https://docker-x.github.io',
-  baseUrl: '/composed/',
-
-  organizationName: 'docker-x',
-  projectName: 'composed',
+  url: process.env.SITE_URL || 'https://composed.netlify.app',
+  baseUrl: '/',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
