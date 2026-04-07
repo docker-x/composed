@@ -96,6 +96,46 @@ References are resolved by `composed build` before any rendering or merging take
 - If a placeholder references a service or key that does not exist, it is left as-is (no error is raised).
 - Export values are always strings.
 
+---
+
+## Direct references
+
+In addition to `x-exports`, you can reference fields from other services directly using path syntax. This eliminates the need to duplicate values in `x-exports` for plain image services.
+
+### Supported paths
+
+| Syntax | Resolves to | Example |
+|--------|-------------|---------|
+| `${svc.environment.KEY}` | Value of environment variable `KEY` in service `svc` | `${postgres.environment.POSTGRES_PASSWORD}` |
+| `${svc.hostname}` | The service name (Compose DNS name) | `${postgres.hostname}` → `postgres` |
+| `${svc.image}` | The `image` field of the service | `${postgres.image}` → `postgres:15` |
+| `${svc.ports[N]}` | The Nth port mapping (0-indexed) | `${postgres.ports[0]}` → `5432:5432` |
+
+### Priority
+
+When both `x-exports` and a direct field match the same reference, **`x-exports` wins**. This lets you override or alias values:
+
+```yaml
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: real-secret
+    x-exports:
+      password: exported-secret   # overrides direct lookup
+
+  app:
+    environment:
+      # Resolves to "exported-secret" (x-exports wins)
+      DB_PASS: "${postgres.password}"
+      # Resolves to "real-secret" (direct lookup, no export with this name)
+      DB_PASS2: "${postgres.environment.POSTGRES_PASSWORD}"
+      # Resolves to "postgres" (virtual field)
+      DB_HOST: "${postgres.hostname}"
+```
+
+Direct references are most useful for plain image services where duplicating values in `x-exports` is redundant. For Helm services, `x-exports` remains the primary mechanism since service fields are empty in `composed.yaml` (they are generated at build time).
+
 ### Example: multi-service wiring
 
 ```yaml

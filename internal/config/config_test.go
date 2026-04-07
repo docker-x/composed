@@ -368,6 +368,60 @@ func checkUnresolvedRef(t *testing.T, f *File) {
 	}
 }
 
+func checkMalformedPortsRef(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	// Missing closing bracket — must stay unresolved
+	if app.Environment["PG_PORT"] != "${postgres.ports[0}" {
+		t.Errorf("PG_PORT = %q, want unresolved placeholder", app.Environment["PG_PORT"])
+	}
+}
+
+func checkDirectEnvRef(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	if app.Environment["DB_PASS"] != "secret" {
+		t.Errorf("DB_PASS = %q, want %q", app.Environment["DB_PASS"], "secret")
+	}
+}
+
+func checkDirectHostname(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	if app.Environment["DB_HOST"] != "postgres" {
+		t.Errorf("DB_HOST = %q, want %q", app.Environment["DB_HOST"], "postgres")
+	}
+}
+
+func checkDirectImage(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	if app.Environment["PG_IMAGE"] != "postgres:15" {
+		t.Errorf("PG_IMAGE = %q, want %q", app.Environment["PG_IMAGE"], "postgres:15")
+	}
+}
+
+func checkDirectPortsIndex(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	if app.Environment["PG_PORT"] != "5432:5432" {
+		t.Errorf("PG_PORT = %q, want %q", app.Environment["PG_PORT"], "5432:5432")
+	}
+}
+
+func checkExportOverridesDirect(t *testing.T, f *File) {
+	t.Helper()
+	app := f.Services["app"]
+	// x-exports takes priority over direct reference
+	if app.Environment["PASSWORD"] != "exported-secret" {
+		t.Errorf("PASSWORD = %q, want %q", app.Environment["PASSWORD"], "exported-secret")
+	}
+	// direct reference still works for non-exported fields
+	if app.Environment["ACTUAL_PASS"] != "real-secret" {
+		t.Errorf("ACTUAL_PASS = %q, want %q", app.Environment["ACTUAL_PASS"], "real-secret")
+	}
+}
+
 func TestResolveRefs(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -452,6 +506,117 @@ services:
 `,
 			check: checkUnresolvedRef,
 		},
+		{
+			name: "direct environment reference",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+  app:
+    image: myapp
+    environment:
+      DB_PASS: "${postgres.environment.POSTGRES_PASSWORD}"
+`,
+			check: checkDirectEnvRef,
+		},
+		{
+			name: "direct hostname reference",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+  app:
+    image: myapp
+    environment:
+      DB_HOST: "${postgres.hostname}"
+`,
+			check: checkDirectHostname,
+		},
+		{
+			name: "direct image reference",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+  app:
+    image: myapp
+    environment:
+      PG_IMAGE: "${postgres.image}"
+`,
+			check: checkDirectImage,
+		},
+		{
+			name: "direct ports index reference",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+  app:
+    image: myapp
+    environment:
+      PG_PORT: "${postgres.ports[0]}"
+`,
+			check: checkDirectPortsIndex,
+		},
+		{
+			name: "malformed ports ref left as-is",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+  app:
+    image: myapp
+    environment:
+      PG_PORT: "${postgres.ports[0}"
+`,
+			check: checkMalformedPortsRef,
+		},
+		{
+			name: "x-exports takes priority over direct",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: real-secret
+    x-exports:
+      password: exported-secret
+  app:
+    image: myapp
+    environment:
+      PASSWORD: "${postgres.password}"
+      ACTUAL_PASS: "${postgres.environment.POSTGRES_PASSWORD}"
+`,
+			check: checkExportOverridesDirect,
+		},
+		{
+			name: "direct ref in connection string",
+			input: `
+name: test
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+  app:
+    image: myapp
+    environment:
+      DATABASE_URL: "postgresql://user:${postgres.environment.POSTGRES_PASSWORD}@${postgres.hostname}:5432/db"
+`,
+			check: checkConnectionString,
+		},
 	}
 
 	for _, tt := range tests {
@@ -482,7 +647,7 @@ func TestResolveMap(t *testing.T) {
 		},
 	}
 
-	result := resolveMap(input, exports)
+	result := resolveMap(input, exports, nil)
 
 	if result["connection"] != "localhost" {
 		t.Errorf("connection = %v", result["connection"])

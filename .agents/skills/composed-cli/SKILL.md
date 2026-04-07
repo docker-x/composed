@@ -149,6 +149,54 @@ services:
       - postgres
 ```
 
+## Cross-service references
+
+Two ways to reference values from other services:
+
+### x-exports (explicit interface)
+
+Define key-value pairs on a service, reference them as `${service.key}`:
+
+```yaml
+services:
+  postgres:
+    image: postgres:15
+    x-exports:
+      host: postgres
+      password: secret
+
+  app:
+    environment:
+      DB_URL: "postgresql://postgres:${postgres.password}@${postgres.host}/mydb"
+```
+
+### Direct references (field lookup)
+
+Reference service fields directly without exports:
+
+| Syntax | Resolves to |
+|--------|-------------|
+| `${svc.environment.KEY}` | Value of env var KEY |
+| `${svc.hostname}` | Service name (Compose DNS) |
+| `${svc.image}` | The image field |
+| `${svc.ports[N]}` | Nth port mapping (0-indexed) |
+
+```yaml
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: secret
+
+  app:
+    environment:
+      DB_PASS: "${postgres.environment.POSTGRES_PASSWORD}"
+      DB_HOST: "${postgres.hostname}"
+```
+
+**Priority**: x-exports checked first (explicit wins), then direct field lookup.
+Best for plain image services. For Helm services, use x-exports (fields are empty until build).
+
 ## Values merge priority
 
 `values_file` (helm `-f`, base) → inline `values:` (helm `--set`, highest)

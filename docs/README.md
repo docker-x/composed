@@ -42,7 +42,9 @@ Point at any Helm chart -- OCI registry, repo URL, or local directory. Composed 
 
 ### Cross-service references
 
-Reference values from one service in another using `${service.key}` placeholders -- like Terraform variables but for Compose. Define exports on any service, use them anywhere.
+Reference values from one service in another using `${service.key}` placeholders -- like Terraform variables but for Compose.
+
+**Explicit exports** -- define a public interface with `x-exports`:
 
 ```yaml
 services:
@@ -57,6 +59,24 @@ services:
     environment:
       REDIS_URL: "redis://${redis.host}:${redis.port}"
 ```
+
+**Direct references** -- reach into a service's fields without exports:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: secret
+
+  app:
+    image: myapp:latest
+    environment:
+      DB_PASS: "${postgres.environment.POSTGRES_PASSWORD}"
+      DB_HOST: "${postgres.hostname}"
+```
+
+Direct references support `environment.KEY`, `hostname`, `image`, and `ports[N]`. When both styles match, `x-exports` wins.
 
 ### Mix anything
 
@@ -120,7 +140,7 @@ composed up                                # docker compose up
 - [Installation](getting-started/installation.md) -- Install options: Homebrew, binary, Go.
 - [Quick Start](getting-started/quick-start.md) -- Full walkthrough with a real Helm chart.
 - [Config File](guide/config-file.md) -- Format, service types, build pipeline.
-- [Extensions](guide/extensions.md) -- `x-helm`, `x-compose-file`, `x-exports` reference.
+- [Extensions](guide/extensions.md) -- `x-helm`, `x-compose-file`, `x-exports`, and direct references.
 - [Translation Rules](guide/translation-rules.md) -- How K8s resources map to Compose.
 - [CLI Reference](cli/init.md) -- Every command and flag.
 

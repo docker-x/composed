@@ -11,6 +11,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -97,7 +99,8 @@ func Parse(data []byte) (*File, error) {
 }
 
 // ResolveRefs resolves ${service.key} references in environment values
-// and helm values using the x-exports from all services.
+// and helm values. Resolution priority: x-exports first, then direct
+// field lookup (environment, hostname, image, ports).
 func (f *File) ResolveRefs() error {
 	// Build export index: service_name.key → value
 	exports := make(map[string]string)
@@ -108,40 +111,121 @@ func (f *File) ResolveRefs() error {
 		}
 	}
 
+	// Snapshot services before mutation so direct references always read
+	// original (pre-resolution) values regardless of map iteration order.
+	snapshot := make(map[string]Service, len(f.Services))
+	for name := range f.Services {
+		svc := f.Services[name]
+		cp := svc
+		if svc.Environment != nil {
+			cp.Environment = make(map[string]string, len(svc.Environment))
+			for k, v := range svc.Environment {
+				cp.Environment[k] = v
+			}
+		}
+		if svc.Ports != nil {
+			cp.Ports = make([]string, len(svc.Ports))
+			copy(cp.Ports, svc.Ports)
+		}
+		snapshot[name] = cp
+	}
+
 	// Resolve in all services
 	for name := range f.Services {
 		svc := f.Services[name]
 		if svc.Environment != nil {
 			for k, v := range svc.Environment {
-				svc.Environment[k] = resolveString(v, exports)
+				svc.Environment[k] = resolveString(v, exports, snapshot)
 			}
 		}
 		if svc.XHelm != nil && svc.XHelm.Values != nil {
-			svc.XHelm.Values = resolveMap(svc.XHelm.Values, exports)
+			svc.XHelm.Values = resolveMap(svc.XHelm.Values, exports, snapshot)
 		}
 		f.Services[name] = svc
 	}
 	return nil
 }
 
-// resolveString replaces ${foo.bar} placeholders with export values.
-func resolveString(s string, exports map[string]string) string {
-	result := s
-	for key, val := range exports {
-		placeholder := "${" + key + "}"
-		result = strings.ReplaceAll(result, placeholder, val)
-	}
-	return result
+// refPattern matches ${service.path} placeholders.
+var refPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// resolveString replaces ${foo.bar} placeholders with export values
+// or direct service field lookups.
+func resolveString(s string, exports map[string]string, services map[string]Service) string {
+	return refPattern.ReplaceAllStringFunc(s, func(match string) string {
+		ref := match[2 : len(match)-1] // strip ${ and }
+
+		// 1. Check x-exports first
+		if val, ok := exports[ref]; ok {
+			return val
+		}
+
+		// 2. Try direct field lookup
+		if val, ok := resolveDirectRef(ref, services); ok {
+			return val
+		}
+
+		// 3. Leave unresolved
+		return match
+	})
 }
 
-func resolveMap(m map[string]interface{}, exports map[string]string) map[string]interface{} {
+// resolveDirectRef resolves a dotted reference like "svc.environment.KEY",
+// "svc.hostname", "svc.image", or "svc.ports[0]" against service definitions.
+func resolveDirectRef(ref string, services map[string]Service) (string, bool) {
+	// Split on first dot: service_name.rest
+	dot := strings.IndexByte(ref, '.')
+	if dot < 0 {
+		return "", false
+	}
+	svcName := ref[:dot]
+	field := ref[dot+1:]
+
+	svc, ok := services[svcName]
+	if !ok {
+		return "", false
+	}
+
+	switch {
+	case field == "hostname":
+		return svcName, true
+
+	case field == "image":
+		if svc.Image != "" {
+			return svc.Image, true
+		}
+		return "", false
+
+	case strings.HasPrefix(field, "environment."):
+		key := field[len("environment."):]
+		if svc.Environment != nil {
+			if val, ok := svc.Environment[key]; ok {
+				return val, true
+			}
+		}
+		return "", false
+
+	case strings.HasPrefix(field, "ports[") && strings.HasSuffix(field, "]"):
+		// Parse ports[N] — must be exactly ports[<int>]
+		idxStr := field[len("ports[") : len(field)-1]
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil || idx < 0 || idx >= len(svc.Ports) {
+			return "", false
+		}
+		return svc.Ports[idx], true
+	}
+
+	return "", false
+}
+
+func resolveMap(m map[string]interface{}, exports map[string]string, services map[string]Service) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
 		switch val := v.(type) {
 		case string:
-			out[k] = resolveString(val, exports)
+			out[k] = resolveString(val, exports, services)
 		case map[string]interface{}:
-			out[k] = resolveMap(val, exports)
+			out[k] = resolveMap(val, exports, services)
 		default:
 			out[k] = v
 		}
