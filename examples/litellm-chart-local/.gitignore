@@ -1,0 +1,6 @@
+# Downloaded subcharts (reproduced by helm dep update)
+charts/
+Chart.lock
+
+# Generated output
+docker-compose.yaml

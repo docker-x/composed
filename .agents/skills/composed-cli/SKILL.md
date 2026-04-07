@@ -1,0 +1,243 @@
+---
+name: composed-cli
+description: Build and use the composed CLI to combine Helm charts, Docker images, and compose files into a single docker-compose.yaml. Use when managing stacks defined in composed.yaml, converting Helm charts to Compose, or scaffolding new projects with init/add.
+---
+
+# composed
+
+## When to Use
+
+- User wants to compose a multi-service stack from Helm charts, existing compose files, and/or plain images
+- User asks to "build", "deploy", or "bring up" a stack defined in a `composed.yaml`
+- User wants to convert Kubernetes manifests or Helm charts to Docker Compose
+- User mentions composed, composed.yaml, or "mega compose"
+
+## Binary Location
+
+```
+~/.local/bin/composed
+```
+
+Source: https://github.com/docker-x/composed
+
+If the binary doesn't exist or is stale, build it:
+```bash
+go install github.com/docker-x/composed@latest
+```
+
+Or from source:
+```bash
+git clone https://github.com/docker-x/composed.git
+cd composed && go build -o composed . && ln -sf "$(pwd)/composed" ~/.local/bin/composed
+```
+
+## Commands
+
+### `init` — Create a new project
+
+```bash
+composed init                        # project name = directory name
+composed init --project my-stack
+```
+
+### `init --helm-values` — Scaffold values files
+
+```bash
+composed init --helm-values
+```
+
+Scans `composed.yaml` for services with `x-helm`, runs `helm show values` for
+each, and writes `<name>.values.yaml`. The file is identical to what
+`helm show values` returns — all options with comments. The `values_file:`
+reference is added to `x-helm` automatically.
+
+Idempotent — skips services that already have a `values_file`.
+
+### `add` — Add a service (auto-detects type)
+
+Source type is auto-detected by probing OCI registry manifests or inspecting the filesystem:
+- `oci://...` → probes registry manifest (helm chart or container image)
+- `*.yaml` / `*.yml` → compose file include
+- Directory with `Chart.yaml` → local helm chart
+- Everything else → Docker image
+
+Name is derived from the source if not given.
+
+```bash
+# Fully automatic
+composed add oci://docker.litellm.ai/berriai/litellm-helm
+composed add postgres:15-alpine --port 5432:5432 --env POSTGRES_PASSWORD=secret
+
+# Explicit name
+composed add litellm oci://docker.litellm.ai/berriai/litellm-helm --set image.tag=main-stable
+
+# Local chart directory
+composed add ./litellm-helm
+composed add ./litellm-helm --values-file litellm-helm.values.yaml
+
+# Helm values (3 ways)
+composed add oci://... --set key=val                    # inline in composed.yaml
+composed add oci://... --values values.yaml             # merge file inline
+composed add oci://... --values-file ./values.yaml      # reference, loaded at build time
+
+# With dependencies
+composed add myapp:latest --depends-on postgres --depends-on redis
+```
+
+### `build` — Build docker-compose.yaml
+
+```bash
+composed build                    # finds composed.yaml walking up from cwd
+composed build -f composed.yaml -o docker-compose.yaml
+composed build -o -               # stdout
+```
+
+### `up` — Build and start
+
+```bash
+composed up
+```
+
+### `down` — Stop the stack
+
+```bash
+composed down
+```
+
+## composed.yaml Format
+
+`composed.yaml` is a Docker Compose file with `x-` extensions. Plain services
+work with `docker compose up` directly. Services with `x-helm` or
+`x-compose-file` need `composed build` first.
+
+```yaml
+name: my-stack
+
+services:
+  # Plain compose service — standard syntax, zero new concepts
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+    x-exports:
+      host: postgres
+      password: secret
+
+  # Helm chart — x-helm extension
+  litellm:
+    x-helm:
+      chart: oci://docker.litellm.ai/berriai/litellm-helm
+      values_file: ./values.yaml      # loaded at build time via helm -f
+      values:                          # inline overrides (passed via --set)
+        image:
+          tag: main-stable
+
+  # Include external compose file
+  monitoring:
+    x-compose-file: ./monitoring/docker-compose.yaml
+
+  # Cross-service references via x-exports
+  app:
+    image: my-app:latest
+    environment:
+      DATABASE_URL: "postgresql://postgres:${postgres.password}@${postgres.host}/mydb"
+    depends_on:
+      - postgres
+```
+
+## Values merge priority
+
+`values_file` (helm `-f`, base) → inline `values:` (helm `--set`, highest)
+
+## Config file resolution
+
+All commands walk up the directory tree to find `composed.yaml` (like `git` finds `.git`). Use `-f` to override.
+
+## Workflows
+
+### Quick start (OCI chart)
+
+```bash
+composed init
+composed add oci://docker.litellm.ai/berriai/litellm-helm
+composed up
+```
+
+### With full values reference
+
+```bash
+composed init
+composed add oci://docker.litellm.ai/berriai/litellm-helm
+composed init --helm-values    # writes litellm-helm.values.yaml
+# edit litellm-helm.values.yaml
+composed up
+```
+
+### Local chart (fastest iteration)
+
+```bash
+composed init
+helm pull oci://docker.litellm.ai/berriai/litellm-helm --untar
+composed add ./litellm-helm --values-file litellm-helm.values.yaml
+# write litellm-helm.values.yaml with just your overrides
+composed up
+```
+
+No network after initial pull. Edit values or even chart templates, then `composed up`.
+
+### What to track in git
+
+Only `composed.yaml`, values files, and READMEs. Everything else is reproduced:
+
+```gitignore
+# Downloaded charts
+litellm-helm/
+
+# Generated output
+docker-compose.yaml
+```
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `main.go` | CLI entrypoint |
+| `cmd/config.go` | init + add + init --helm-values |
+| `cmd/build.go` | build + up + down commands |
+| `cmd/oci.go` | OCI registry manifest detection |
+| `cmd/resolve.go` | Config file walk-up resolution |
+| `internal/config/` | composed.yaml parsing |
+| `internal/helm/` | Helm chart rendering |
+| `internal/k8s/` | K8s manifest parser |
+| `internal/translate/` | K8s-to-Compose translator |
+| `internal/compose/` | Compose model + YAML emitter |
+| `internal/merge/` | Multi-compose merger |
+
+## Container Labels
+
+Every service in the output `docker-compose.yaml` is stamped with labels:
+
+```yaml
+labels:
+  com.composed.managed: "true"
+  com.composed.project: my-stack
+```
+
+Find composed-managed containers:
+```bash
+docker ps --filter label=com.composed.managed
+docker ps --filter label=com.composed.project=my-stack
+```
+
+## Examples
+
+| Example | Description |
+|---------|-------------|
+| `examples/litellm-chart/` | Minimal — OCI chart, 3 commands |
+| `examples/litellm-chart-with-values/` | OCI chart + scaffolded values file |
+| `examples/litellm-chart-local/` | Local chart + hand-written overrides |
+| `examples/litellm-n8n-shared-pg/` | Shared Postgres, cross-refs via x-exports |

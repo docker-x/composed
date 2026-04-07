@@ -1,53 +1,58 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gosimple
     - gocritic
-    - gofmt
     - misspell
     - bodyclose
-    - exportloopref
     - nilerr
     - prealloc
     - unconvert
     - unparam
 
-linters-settings:
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-    disabled-checks:
-      - hugeParam   # k8s types are large by design
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam # k8s types are large by design
 
-  misspell:
-    locale: US
+    misspell:
+      locale: US
 
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment  # not worth the noise for this project
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # not worth the noise for this project
+
+  exclusions:
+    rules:
+      # Test files can have longer functions and unused params
+      - path: _test\.go
+        linters:
+          - unparam
+          - gocritic
+
+      # cmd package uses global vars for cobra flags (by design)
+      - path: cmd/
+        text: "global"
+        linters:
+          - gocritic
 
 issues:
-  exclude-rules:
-    # Test files can have longer functions and unused params
-    - path: _test\.go
-      linters:
-        - unparam
-        - gocritic
-
-    # cmd package uses global vars for cobra flags (by design)
-    - path: cmd/
-      text: "global"
-      linters:
-        - gocritic
-
   max-issues-per-linter: 50
   max-same-issues: 10
+
+formatters:
+  enable:
+    - gofmt

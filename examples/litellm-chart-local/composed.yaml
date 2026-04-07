@@ -1,0 +1,7 @@
+name: litellm-chart-local
+
+services:
+  litellm:
+    x-helm:
+      chart: .
+      values_file: litellm-helm.values.yaml

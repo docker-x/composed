@@ -211,6 +211,17 @@ docker ps --filter label=com.composed.project=my-stack
 | [`litellm-chart-local/`](examples/litellm-chart-local/) | Local wrapper chart pattern |
 | [`litellm-n8n-shared-pg/`](examples/litellm-n8n-shared-pg/) | Shared Postgres with schema isolation + cross-refs |
 
+## Development
+
+```bash
+git clone https://github.com/docker-x/composed.git
+cd composed
+make setup   # install git hooks (gofmt + go vet on commit)
+make test    # run tests
+make lint    # run golangci-lint
+make build   # build binary
+```
+
 ## Part of Docker eXtra
 
 **composed** is a [Docker eXtra](https://github.com/docker-x) project — tools that extend Docker Compose with superpowers.
