@@ -30,6 +30,9 @@ jobs:
 
       - run: bun install
       - run: bun run build
+        env:
+          SITE_URL: https://docker-x.github.io
+          BASE_URL: /composed/
 
       - uses: actions/upload-pages-artifact@v4
         with:

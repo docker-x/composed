@@ -7,7 +7,7 @@ const config: Config = {
   favicon: 'img/favicon.ico',
 
   url: process.env.SITE_URL || 'https://composed.netlify.app',
-  baseUrl: '/',
+  baseUrl: process.env.BASE_URL || '/',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
