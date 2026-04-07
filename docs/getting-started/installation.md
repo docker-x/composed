@@ -6,7 +6,13 @@ sidebar_position: 1
 
 This page covers how to install `composed`.
 
-## Option 1: Download a Binary (Recommended)
+## Option 1: Homebrew (macOS / Linux)
+
+```bash
+brew install docker-x/tap/composed
+```
+
+## Option 2: Download a Binary
 
 Pre-built binaries are available for Linux, macOS, and Windows on the
 [GitHub Releases](https://github.com/docker-x/composed/releases) page.
@@ -20,13 +26,7 @@ tar xzf composed_*_linux_amd64.tar.gz
 sudo mv composed /usr/local/bin/
 ```
 
-On macOS you may need to remove the quarantine attribute:
-
-```bash
-xattr -d com.apple.quarantine composed
-```
-
-## Option 2: Go Install
+## Option 3: Go Install
 
 If you have Go 1.26+ installed:
 
@@ -36,7 +36,7 @@ go install github.com/docker-x/composed@latest
 
 Make sure `$GOBIN` (usually `$HOME/go/bin`) is on your PATH.
 
-## Option 3: Build from Source
+## Option 4: Build from Source
 
 ```bash
 git clone https://github.com/docker-x/composed.git

@@ -49,6 +49,19 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+brews:
+  - repository:
+      owner: docker-x
+      name: homebrew-tap
+    name: composed
+    homepage: https://github.com/docker-x/composed
+    description: Compose anything into a Docker Compose file
+    license: Apache-2.0
+    install: |
+      bin.install "composed"
+    test: |
+      system "#{bin}/composed", "--version"
+
 changelog:
   sort: asc
   use: github
@@ -81,6 +94,11 @@ release:
     ## What's Changed
 
     Install with:
+    ```bash
+    brew install docker-x/tap/composed
+    ```
+
+    Or with Go:
     ```bash
     go install github.com/docker-x/composed@{{ .Tag }}
     ```
