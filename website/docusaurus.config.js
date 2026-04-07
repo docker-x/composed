@@ -32,9 +32,10 @@ const config = {
       /** @type {import('@docusaurus/preset-classic').Options} */
       ({
         docs: {
+          path: '../docs',
           routeBasePath: '/',
           sidebarPath: './sidebars.js',
-          editUrl: 'https://github.com/docker-x/composed/tree/main/website/',
+          editUrl: 'https://github.com/docker-x/composed/tree/main/',
         },
         blog: false,
         theme: {
