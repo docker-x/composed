@@ -2,3 +2,4 @@
   base = "website"
   command = "bun install && bun run build"
   publish = "build"
+  ignore = "/bin/false"
