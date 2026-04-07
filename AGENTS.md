@@ -65,3 +65,9 @@ Use `go get -u <pkg>` to update dependencies. Keep `go.mod` tidy with `go mod ti
 ## Pipeline
 
 When asked to fix the pipeline: commit and push without asking. The goal is a green CI, not a diff review.
+
+### GitHub Actions conventions
+
+- **Node.js**: Always use `node-version: lts/*` — never pin a specific major version.
+- **Actions**: Use the latest major version of each action (check before writing).
+- **Lockfiles**: Never commit `package-lock.json` to this public repo (internal registry URLs). Use `npm install` instead of `npm ci`.
