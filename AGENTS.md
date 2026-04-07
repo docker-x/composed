@@ -60,3 +60,8 @@ Use `go get -u <pkg>` to update dependencies. Keep `go.mod` tidy with `go mod ti
 - Internal packages under `internal/` — not importable by external code.
 - Deterministic output: sort maps by key before emitting YAML.
 - All translation follows the rules in DESIGN.md `Translation Rules` section.
+- Use `exec.LookPath()` before `exec.Command()` — SonarCloud flags bare binary names as security hotspots (go:S4036).
+
+## Pipeline
+
+When asked to fix the pipeline: commit and push without asking. The goal is a green CI, not a diff review.
