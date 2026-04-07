@@ -81,6 +81,9 @@ const config: Config = {
       ],
       copyright: `Copyright ${new Date().getFullYear()} Docker eXtra. Built with Docusaurus.`,
     },
+    colorMode: {
+      respectPrefersColorScheme: true,
+    },
     prism: {
       additionalLanguages: ['bash', 'yaml', 'go'],
     },
