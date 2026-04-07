@@ -174,6 +174,46 @@ services:
 Other services reference exports via `${service_name.key}`. These are resolved
 by `composed build` before any Helm rendering or output.
 
+### Direct references
+
+In addition to `x-exports`, services can reference fields from other services
+directly using path syntax:
+
+```text
+${service_name.environment.KEY}   # value of environment variable KEY
+${service_name.hostname}          # always resolves to the service name (Compose DNS)
+${service_name.image}             # the image field
+${service_name.ports[N]}          # Nth port mapping (e.g. "5432:5432")
+```
+
+Direct references and `x-exports` can be mixed. Resolution priority:
+1. `x-exports` (checked first — explicit interface wins)
+2. Direct field lookup (fallback)
+
+This means `x-exports` can override or alias a direct field:
+
+```yaml
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: secret
+    x-exports:
+      password: secret       # explicit export
+
+  app:
+    environment:
+      # Both styles work:
+      DB_PASS: "${postgres.password}"                    # from x-exports
+      DB_PASS2: "${postgres.environment.POSTGRES_PASSWORD}"  # direct reference
+      DB_HOST: "${postgres.hostname}"                    # always = "postgres"
+```
+
+Direct references are most useful for plain image services where duplicating
+values in `x-exports` is redundant. For Helm services, `x-exports` remains
+the primary mechanism since the service fields are empty in `composed.yaml`
+(they're generated at build time).
+
 ### Standard compose fields
 
 All standard Docker Compose service fields work as-is on any service:
