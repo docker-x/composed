@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+slug: /
+---
+
 # Composed
 
 **Compose anything into a Docker Compose file.**

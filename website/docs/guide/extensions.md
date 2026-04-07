@@ -1,3 +1,7 @@
+---
+sidebar_position: 2
+---
+
 # Extensions
 
 Composed extends the Docker Compose service format with `x-` prefixed fields. These extensions control how services are sourced and how they share configuration. Docker Compose ignores all `x-` fields, so the file remains valid compose syntax.

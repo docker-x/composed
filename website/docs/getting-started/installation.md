@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Installation
 
 This page covers how to install `composed` and its prerequisites.

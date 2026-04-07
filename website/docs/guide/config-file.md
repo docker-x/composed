@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Config File
 
 The `composed.yaml` file is the single source of truth for your project. It declares every service -- Helm charts, Docker images, and external compose files -- in one place.

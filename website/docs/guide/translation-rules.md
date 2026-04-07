@@ -1,3 +1,7 @@
+---
+sidebar_position: 4
+---
+
 # Translation Rules
 
 This page documents how Kubernetes resources from Helm charts are translated into Docker Compose equivalents. This is the core of what `composed build` does when processing `x-helm` services.

@@ -1,3 +1,7 @@
+---
+sidebar_position: 2
+---
+
 # Quick Start
 
 This guide walks through creating a stack with a Helm chart and a plain Docker
@@ -194,7 +198,7 @@ This runs `docker compose down`, stopping and removing the containers.
   `x-exports` for cross-service references.
 - Run `composed init --helm-values` to scaffold the full Helm values file for
   each chart, so you can customize every option.
-- Look at the [examples/](../../examples/) directory for more realistic stacks,
+- Look at the [examples/](https://github.com/docker-x/composed/tree/main/examples) directory for more realistic stacks,
   including shared Postgres with schema isolation and multi-chart setups.
 - Read the [Config File](../guide/config-file.md) guide for the full reference
   on `x-helm`, `x-compose-file`, and `x-exports`.

@@ -1,3 +1,7 @@
+---
+sidebar_position: 3
+---
+
 # Helm Values
 
 There are three ways to pass values to a Helm chart service in Composed. Each method targets a different workflow: quick one-off overrides, importing a complete values file, or keeping values in a separate file that is loaded at build time.
