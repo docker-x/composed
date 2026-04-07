@@ -21,6 +21,7 @@ type Service struct {
 	Entrypoint  []string
 	Command     []string
 	Environment map[string]string
+	EnvFile     []string // env_file references
 	Ports       []string
 	Volumes     []string // "name:/path" or "/host:/container"
 	Tmpfs       []string // tmpfs mounts (e.g. "/dev/shm")
@@ -68,8 +69,9 @@ type RestartPolicy struct {
 }
 
 type Volume struct {
-	Driver string // default: "local"
-	// Labels or driver_opts could be added later
+	Driver   string // default: "local"
+	External bool   // if true, volume must already exist
+	Name     string // actual Docker volume name (when different from key)
 }
 
 type Network struct {

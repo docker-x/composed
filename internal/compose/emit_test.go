@@ -263,6 +263,43 @@ func TestEmit_ConfigFile(t *testing.T) {
 	}
 }
 
+func TestEmit_ExternalVolume(t *testing.T) {
+	f := NewFile()
+	f.Services["app"] = NewService("app:latest")
+	f.Volumes["data"] = &Volume{External: true, Name: "my-ext-vol"}
+
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+
+	if !strings.Contains(out, "external: true") {
+		t.Error("missing external: true")
+	}
+	if !strings.Contains(out, "name: my-ext-vol") {
+		t.Error("missing name: my-ext-vol")
+	}
+}
+
+func TestEmit_ExternalVolumeNoName(t *testing.T) {
+	f := NewFile()
+	f.Services["app"] = NewService("app:latest")
+	f.Volumes["data"] = &Volume{External: true}
+
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+
+	if !strings.Contains(out, "external: true") {
+		t.Error("missing external: true")
+	}
+	// No name: line should appear
+	if strings.Contains(out, "name:") {
+		t.Error("should not emit name when empty")
+	}
+}
+
 func TestEmit_EmptyFile(t *testing.T) {
 	f := NewFile()
 	out, err := Emit(f)

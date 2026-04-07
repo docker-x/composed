@@ -163,6 +163,68 @@ func checkEmptyConfig(t *testing.T, f *File) {
 	}
 }
 
+func checkTopLevelShellShorthand(t *testing.T, f *File) {
+	t.Helper()
+	entry, ok := f.XShell["sso-token"]
+	if !ok {
+		t.Fatal("x-shell entry 'sso-token' not found")
+	}
+	if entry.Command != "echo my-token" {
+		t.Errorf("Command = %q, want %q", entry.Command, "echo my-token")
+	}
+	if entry.AllowFailure {
+		t.Error("AllowFailure should be false for shorthand")
+	}
+}
+
+func checkTopLevelShellLongForm(t *testing.T, f *File) {
+	t.Helper()
+	entry, ok := f.XShell["sso-token"]
+	if !ok {
+		t.Fatal("x-shell entry 'sso-token' not found")
+	}
+	if entry.Command != "vault kv get -field=token secret/myapp" {
+		t.Errorf("Command = %q", entry.Command)
+	}
+	if !entry.AllowFailure {
+		t.Error("AllowFailure should be true")
+	}
+}
+
+func checkTopLevelShellMixed(t *testing.T, f *File) {
+	t.Helper()
+	if len(f.XShell) != 2 {
+		t.Fatalf("expected 2 x-shell entries, got %d", len(f.XShell))
+	}
+	short, ok := f.XShell["quick"]
+	if !ok {
+		t.Fatal("x-shell entry 'quick' not found")
+	}
+	if short.Command != "echo fast" {
+		t.Errorf("quick.Command = %q", short.Command)
+	}
+	long, ok := f.XShell["careful"]
+	if !ok {
+		t.Fatal("x-shell entry 'careful' not found")
+	}
+	if long.Command != "echo slow" {
+		t.Errorf("careful.Command = %q", long.Command)
+	}
+	if !long.AllowFailure {
+		t.Error("careful.AllowFailure should be true")
+	}
+}
+
+func checkNoShellEntries(t *testing.T, f *File) {
+	t.Helper()
+	if f.XShell == nil {
+		t.Fatal("XShell should be initialized, not nil")
+	}
+	if len(f.XShell) != 0 {
+		t.Errorf("expected 0 x-shell entries, got %d", len(f.XShell))
+	}
+}
+
 func TestParse(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -256,11 +318,60 @@ services:
 			check: checkFullServiceFields,
 		},
 		{
-			name: "empty config",
-			input: `
-name: empty
-`,
+			name:  "empty config",
+			input: `name: empty`,
 			check: checkEmptyConfig,
+		},
+		{
+			name: "top-level x-shell shorthand",
+			input: `
+name: test
+x-shell:
+  sso-token: "echo my-token"
+services:
+  app:
+    image: myapp
+`,
+			check: checkTopLevelShellShorthand,
+		},
+		{
+			name: "top-level x-shell long form",
+			input: `
+name: test
+x-shell:
+  sso-token:
+    command: "vault kv get -field=token secret/myapp"
+    allow_failure: true
+services:
+  app:
+    image: myapp
+`,
+			check: checkTopLevelShellLongForm,
+		},
+		{
+			name: "top-level x-shell mixed forms",
+			input: `
+name: test
+x-shell:
+  quick: "echo fast"
+  careful:
+    command: "echo slow"
+    allow_failure: true
+services:
+  app:
+    image: myapp
+`,
+			check: checkTopLevelShellMixed,
+		},
+		{
+			name: "no x-shell entries",
+			input: `
+name: test
+services:
+  app:
+    image: myapp
+`,
+			check: checkNoShellEntries,
 		},
 		{
 			name:    "invalid yaml",
@@ -625,7 +736,7 @@ services:
 			if err != nil {
 				t.Fatalf("Parse error: %v", err)
 			}
-			if err := f.ResolveRefs(); err != nil {
+			if err := f.ResolveRefs(nil); err != nil {
 				t.Fatalf("ResolveRefs error: %v", err)
 			}
 			tt.check(t, f)
@@ -658,5 +769,186 @@ func TestResolveMap(t *testing.T) {
 	}
 	if nested["port"] != 5432 {
 		t.Errorf("nested.port = %v (should be unchanged)", nested["port"])
+	}
+}
+
+func TestRunShellEntries(t *testing.T) {
+	t.Run("captures stdout", func(t *testing.T) {
+		entries := map[string]ShellEntry{
+			"greeting": {Command: "echo hello-world"},
+		}
+		vals, err := RunShellEntries(entries)
+		if err != nil {
+			t.Fatalf("RunShellEntries error: %v", err)
+		}
+		if vals["greeting"] != "hello-world" {
+			t.Errorf("greeting = %q, want %q", vals["greeting"], "hello-world")
+		}
+	})
+
+	t.Run("failure aborts", func(t *testing.T) {
+		entries := map[string]ShellEntry{
+			"fail": {Command: "false"},
+		}
+		_, err := RunShellEntries(entries)
+		if err == nil {
+			t.Fatal("expected error from failing command")
+		}
+	})
+
+	t.Run("allow_failure continues", func(t *testing.T) {
+		entries := map[string]ShellEntry{
+			"fail": {Command: "false", AllowFailure: true},
+		}
+		vals, err := RunShellEntries(entries)
+		if err != nil {
+			t.Fatalf("expected no error with allow_failure, got: %v", err)
+		}
+		if _, ok := vals["fail"]; ok {
+			t.Error("failed entry should not have a value")
+		}
+	})
+}
+
+func TestResolveRefsWithShellValues(t *testing.T) {
+	f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+    environment:
+      TOKEN: "${sso-token}"
+      HOST: "${postgres.host}"
+  postgres:
+    image: postgres:15
+    x-exports:
+      host: postgres
+`))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	shellValues := map[string]string{
+		"sso-token": "my-secret-token",
+	}
+
+	if err := f.ResolveRefs(shellValues); err != nil {
+		t.Fatalf("ResolveRefs error: %v", err)
+	}
+
+	app := f.Services["app"]
+	if app.Environment["TOKEN"] != "my-secret-token" {
+		t.Errorf("TOKEN = %q, want %q", app.Environment["TOKEN"], "my-secret-token")
+	}
+	if app.Environment["HOST"] != "postgres" {
+		t.Errorf("HOST = %q, want %q", app.Environment["HOST"], "postgres")
+	}
+}
+
+func TestParseVolumes(t *testing.T) {
+	t.Run("external volume with name", func(t *testing.T) {
+		f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+volumes:
+  data:
+    external: true
+    name: litellm-ext-db
+`))
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		vol, ok := f.Volumes["data"]
+		if !ok {
+			t.Fatal("volume 'data' not found")
+		}
+		if !vol.External {
+			t.Error("External should be true")
+		}
+		if vol.Name != "litellm-ext-db" {
+			t.Errorf("Name = %q, want %q", vol.Name, "litellm-ext-db")
+		}
+	})
+
+	t.Run("volume with driver", func(t *testing.T) {
+		f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+volumes:
+  logs:
+    driver: tmpfs
+`))
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		vol := f.Volumes["logs"]
+		if vol.Driver != "tmpfs" {
+			t.Errorf("Driver = %q, want %q", vol.Driver, "tmpfs")
+		}
+		if vol.External {
+			t.Error("External should be false")
+		}
+	})
+
+	t.Run("empty volume", func(t *testing.T) {
+		f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+volumes:
+  data:
+`))
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if _, ok := f.Volumes["data"]; !ok {
+			t.Fatal("volume 'data' not found")
+		}
+	})
+
+	t.Run("no volumes", func(t *testing.T) {
+		f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+`))
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if f.Volumes == nil {
+			t.Fatal("Volumes should be initialized, not nil")
+		}
+		if len(f.Volumes) != 0 {
+			t.Errorf("expected 0 volumes, got %d", len(f.Volumes))
+		}
+	})
+}
+
+func TestInlineShellRef(t *testing.T) {
+	f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+    environment:
+      GREETING: "${shell:echo inline-hello}"
+`))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if err := f.ResolveRefs(nil); err != nil {
+		t.Fatalf("ResolveRefs error: %v", err)
+	}
+
+	app := f.Services["app"]
+	if app.Environment["GREETING"] != "inline-hello" {
+		t.Errorf("GREETING = %q, want %q", app.Environment["GREETING"], "inline-hello")
 	}
 }

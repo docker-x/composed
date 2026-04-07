@@ -58,6 +58,41 @@ Everything defined in the external file is included in the final output:
 
 This is useful for incorporating third-party or team-maintained compose stacks without copying their contents.
 
+### Component pattern
+
+Components should define infrastructure only -- image, healthcheck, ports, volumes. Credentials and configuration belong in the consumer's `composed.yaml`, passed via `environment:` or `env_file:`.
+
+```yaml
+# pgvector/compose.yaml -- reusable component (no credentials)
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+```
+
+```yaml
+# composed.yaml -- consumer provides credentials
+services:
+  postgres:
+    x-compose-file: ./pgvector/compose.yaml
+    env_file:
+      - ./postgres.env       # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+
+  app:
+    image: my-app:latest
+    environment:
+      DATABASE_URL: "postgresql://${postgres.environment.POSTGRES_USER}:${postgres.environment.POSTGRES_PASSWORD}@${postgres.hostname}/mydb"
+    depends_on:
+      - postgres
+```
+
+At build time, Composed reads `env_file` entries and component `environment:` blocks to make values available for `${service.environment.KEY}` cross-references. Preloaded values are used only for resolution -- they are not duplicated in the output.
+
 ---
 
 ## x-exports
@@ -169,6 +204,63 @@ services:
       - postgres
       - redis
 ```
+
+---
+
+## x-shell
+
+`x-shell` is a **top-level** key that runs shell commands on the host during `composed build` and captures their stdout as referenceable values. Shell entries are not services -- they produce no containers.
+
+### Shorthand (string value)
+
+```yaml
+x-shell:
+  sso-token: "vault kv get -field=token secret/myapp"
+
+services:
+  app:
+    image: myapp
+    environment:
+      TOKEN: "${sso-token}"
+```
+
+`${sso-token}` resolves to the trimmed stdout of the command.
+
+### Long form (map value)
+
+```yaml
+x-shell:
+  sso-token:
+    command: "vault kv get -field=token secret/myapp"
+    allow_failure: true
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `command` | yes | -- | Shell command (passed to `sh -c`), stdout is captured |
+| `allow_failure` | no | `false` | If `true`, non-zero exit logs a warning instead of aborting |
+
+### Inline shell reference
+
+For one-off values, use `${shell:...}` directly in any string value:
+
+```yaml
+services:
+  app:
+    image: myapp
+    environment:
+      TOKEN: "${shell:vault kv get -field=token secret/myapp}"
+```
+
+If the same command appears multiple times, it runs multiple times. Use the named form for shared values.
+
+### Execution rules
+
+- All `x-shell` entries run **before** any other processing (Helm rendering, compose merging, reference resolution).
+- Named entries run in declaration order.
+- Inline `${shell:...}` references are resolved during reference resolution, after named shells have run.
+- Stdout is trimmed of leading/trailing whitespace.
+- Named shell values share the same reference namespace as `x-exports` -- `${name}` resolves to stdout.
 
 ---
 

@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/docker-x/composed/internal/compose"
+	"github.com/docker-x/composed/internal/config"
 )
 
 const testTagMainStable = "main-stable"
@@ -398,6 +403,199 @@ func TestDeriveComponentName(t *testing.T) {
 	}
 }
 
+func TestOverlayServiceFields(t *testing.T) {
+	t.Run("merges environment (user wins)", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		svc.Environment["CHART_VAR"] = "from-chart"
+		svc.Environment["SHARED"] = "chart-value"
+		frag.Services["web"] = svc
+
+		cfgSvc := &config.Service{
+			Environment: map[string]string{
+				"USER_VAR": "from-user",
+				"SHARED":   "user-wins",
+			},
+		}
+
+		overlayServiceFields(frag, "web", cfgSvc)
+
+		if svc.Environment["CHART_VAR"] != "from-chart" {
+			t.Errorf("CHART_VAR = %q, want from-chart", svc.Environment["CHART_VAR"])
+		}
+		if svc.Environment["USER_VAR"] != "from-user" {
+			t.Errorf("USER_VAR = %q, want from-user", svc.Environment["USER_VAR"])
+		}
+		if svc.Environment["SHARED"] != "user-wins" {
+			t.Errorf("SHARED = %q, want user-wins", svc.Environment["SHARED"])
+		}
+	})
+
+	t.Run("appends env_file", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		svc.EnvFile = []string{"./existing.env"}
+		frag.Services["web"] = svc
+
+		cfgSvc := &config.Service{
+			EnvFile: []string{"./user.env"},
+		}
+
+		overlayServiceFields(frag, "web", cfgSvc)
+
+		if len(svc.EnvFile) != 2 {
+			t.Fatalf("EnvFile len = %d, want 2", len(svc.EnvFile))
+		}
+		if svc.EnvFile[0] != "./existing.env" || svc.EnvFile[1] != "./user.env" {
+			t.Errorf("EnvFile = %v", svc.EnvFile)
+		}
+	})
+
+	t.Run("appends volumes", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		svc.Volumes = []string{"data:/data"}
+		frag.Services["web"] = svc
+
+		cfgSvc := &config.Service{
+			Volumes: []string{"./config.yaml:/etc/config.yaml"},
+		}
+
+		overlayServiceFields(frag, "web", cfgSvc)
+
+		if len(svc.Volumes) != 2 {
+			t.Fatalf("Volumes len = %d, want 2", len(svc.Volumes))
+		}
+	})
+
+	t.Run("appends ports", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		svc.Ports = []string{"80:80"}
+		frag.Services["web"] = svc
+
+		cfgSvc := &config.Service{
+			Ports: []string{"443:443"},
+		}
+
+		overlayServiceFields(frag, "web", cfgSvc)
+
+		if len(svc.Ports) != 2 {
+			t.Fatalf("Ports len = %d, want 2", len(svc.Ports))
+		}
+	})
+
+	t.Run("falls back to single service if name not found", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		frag.Services["chart-generated-name"] = svc
+
+		cfgSvc := &config.Service{
+			Environment: map[string]string{"KEY": "val"},
+		}
+
+		overlayServiceFields(frag, "not-matching", cfgSvc)
+
+		if svc.Environment["KEY"] != "val" {
+			t.Errorf("KEY = %q, want val", svc.Environment["KEY"])
+		}
+	})
+
+	t.Run("no-op when name not found and multiple services", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc1 := compose.NewService("nginx:latest")
+		svc2 := compose.NewService("redis:latest")
+		frag.Services["svc1"] = svc1
+		frag.Services["svc2"] = svc2
+
+		cfgSvc := &config.Service{
+			Environment: map[string]string{"KEY": "val"},
+		}
+
+		overlayServiceFields(frag, "not-matching", cfgSvc)
+
+		// Neither should be modified
+		if _, ok := svc1.Environment["KEY"]; ok {
+			t.Error("svc1 should not have KEY")
+		}
+		if _, ok := svc2.Environment["KEY"]; ok {
+			t.Error("svc2 should not have KEY")
+		}
+	})
+
+	t.Run("no-op with nil fields", func(t *testing.T) {
+		frag := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		frag.Services["web"] = svc
+
+		cfgSvc := &config.Service{} // all nil
+
+		overlayServiceFields(frag, "web", cfgSvc)
+
+		if len(svc.Environment) != 0 {
+			t.Errorf("Environment should remain empty")
+		}
+	})
+}
+
+func TestApplyConfigVolumes(t *testing.T) {
+	t.Run("overrides chart volume with external", func(t *testing.T) {
+		merged := compose.NewFile()
+		merged.Volumes["data"] = &compose.Volume{} // chart-generated
+
+		cfg := &config.File{
+			Volumes: map[string]config.VolumeConfig{
+				"data": {External: true, Name: "litellm-ext-db"},
+			},
+		}
+
+		applyConfigVolumes(merged, cfg)
+
+		vol := merged.Volumes["data"]
+		if !vol.External {
+			t.Error("External should be true")
+		}
+		if vol.Name != "litellm-ext-db" {
+			t.Errorf("Name = %q, want %q", vol.Name, "litellm-ext-db")
+		}
+	})
+
+	t.Run("adds new volume", func(t *testing.T) {
+		merged := compose.NewFile()
+
+		cfg := &config.File{
+			Volumes: map[string]config.VolumeConfig{
+				"logs": {Driver: "tmpfs"},
+			},
+		}
+
+		applyConfigVolumes(merged, cfg)
+
+		vol, ok := merged.Volumes["logs"]
+		if !ok {
+			t.Fatal("volume 'logs' not found")
+		}
+		if vol.Driver != "tmpfs" {
+			t.Errorf("Driver = %q", vol.Driver)
+		}
+	})
+
+	t.Run("no-op with empty config volumes", func(t *testing.T) {
+		merged := compose.NewFile()
+		merged.Volumes["data"] = &compose.Volume{}
+
+		cfg := &config.File{
+			Volumes: map[string]config.VolumeConfig{},
+		}
+
+		applyConfigVolumes(merged, cfg)
+
+		if merged.Volumes["data"].External {
+			t.Error("should not have been modified")
+		}
+	})
+}
+
 func TestParseComposeYAML(t *testing.T) {
 	yaml := `
 services:
@@ -500,5 +698,181 @@ services:
 	}
 	if len(f2.Services["app"].Command) != 1 {
 		t.Errorf("Command = %v (string form should be single element)", f2.Services["app"].Command)
+	}
+}
+
+func TestParseEnvFileList(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  []string
+	}{
+		{"string", "app.env", []string{"app.env"}},
+		{"list of strings", []interface{}{"a.env", "b.env"}, []string{"a.env", "b.env"}},
+		{"list of objects", []interface{}{
+			map[string]interface{}{"path": "x.env", "required": true},
+		}, []string{"x.env"}},
+		{"nil", nil, nil},
+		{"int", 42, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseEnvFileList(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseEnvFileList len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestLoadEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	content := `# comment
+FOO=bar
+QUOTED="hello world"
+SINGLE='val'
+EMPTY=
+
+# another comment
+DB_HOST=localhost
+`
+	if err := os.WriteFile(envPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := loadEnvFile(envPath)
+
+	want := map[string]string{
+		"FOO":     "bar",
+		"QUOTED":  "hello world",
+		"SINGLE":  "val",
+		"EMPTY":   "",
+		"DB_HOST": "localhost",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("loadEnvFile[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("loadEnvFile returned %d keys, want %d", len(got), len(want))
+	}
+}
+
+func TestLoadEnvFile_Missing(t *testing.T) {
+	got := loadEnvFile("/nonexistent/path/.env")
+	if got != nil {
+		t.Errorf("expected nil for missing file, got %v", got)
+	}
+}
+
+func TestPreloadComposeExports(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a component compose file with environment and env_file
+	compDir := filepath.Join(dir, "pgvector")
+	os.MkdirAll(compDir, 0755)
+	envContent := "EXTRA_FROM_FILE=fromenv\n"
+	os.WriteFile(filepath.Join(compDir, ".env"), []byte(envContent), 0644)
+
+	composeContent := `services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: secret
+    env_file:
+      - .env
+`
+	composeFile := filepath.Join(compDir, "compose.yaml")
+	os.WriteFile(composeFile, []byte(composeContent), 0644)
+
+	// Write composed.yaml
+	composedContent := `name: test
+services:
+  postgres:
+    x-compose-file: ./pgvector/compose.yaml
+    environment:
+      OVERRIDE_KEY: from-composed
+`
+	composedFile := filepath.Join(dir, "composed.yaml")
+	os.WriteFile(composedFile, []byte(composedContent), 0644)
+
+	// Set buildFile so relative paths resolve
+	oldBuildFile := buildFile
+	buildFile = composedFile
+	defer func() { buildFile = oldBuildFile }()
+
+	cfg, err := config.Load(composedFile)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	preloadComposeExports(cfg)
+
+	svc := cfg.Services["postgres"]
+
+	// Component env should be loaded
+	if svc.Environment["POSTGRES_USER"] != "myuser" {
+		t.Errorf("POSTGRES_USER = %q, want myuser", svc.Environment["POSTGRES_USER"])
+	}
+	if svc.Environment["POSTGRES_PASSWORD"] != "secret" {
+		t.Errorf("POSTGRES_PASSWORD = %q, want secret", svc.Environment["POSTGRES_PASSWORD"])
+	}
+	// env_file var should be loaded
+	if svc.Environment["EXTRA_FROM_FILE"] != "fromenv" {
+		t.Errorf("EXTRA_FROM_FILE = %q, want fromenv", svc.Environment["EXTRA_FROM_FILE"])
+	}
+	// composed.yaml entry should NOT be overwritten
+	if svc.Environment["OVERRIDE_KEY"] != "from-composed" {
+		t.Errorf("OVERRIDE_KEY = %q, want from-composed (composed.yaml wins)", svc.Environment["OVERRIDE_KEY"])
+	}
+}
+
+func TestPreloadComposeExports_XExportsBackwardCompat(t *testing.T) {
+	dir := t.TempDir()
+
+	composeContent := `services:
+  db:
+    image: postgres:15
+    x-exports:
+      host: db
+      port: "5432"
+`
+	composeFile := filepath.Join(dir, "db-compose.yaml")
+	os.WriteFile(composeFile, []byte(composeContent), 0644)
+
+	composedContent := `name: test
+services:
+  db:
+    x-compose-file: ./db-compose.yaml
+`
+	composedFile := filepath.Join(dir, "composed.yaml")
+	os.WriteFile(composedFile, []byte(composedContent), 0644)
+
+	oldBuildFile := buildFile
+	buildFile = composedFile
+	defer func() { buildFile = oldBuildFile }()
+
+	cfg, err := config.Load(composedFile)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	preloadComposeExports(cfg)
+
+	svc := cfg.Services["db"]
+	if svc.XExports["host"] != "db" {
+		t.Errorf("XExports[host] = %q, want db", svc.XExports["host"])
+	}
+	if svc.XExports["port"] != "5432" {
+		t.Errorf("XExports[port] = %q, want 5432", svc.XExports["port"])
 	}
 }

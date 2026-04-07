@@ -78,6 +78,25 @@ services:
 
 Direct references support `environment.KEY`, `hostname`, `image`, and `ports[N]`. When both styles match, `x-exports` wins.
 
+### Reusable components
+
+Write generic components once, provide credentials at the consumer level:
+
+```yaml
+services:
+  postgres:
+    x-compose-file: ./pgvector/compose.yaml   # infra only, no credentials
+    env_file:
+      - ./postgres.env                         # consumer provides creds
+
+  app:
+    image: myapp:latest
+    environment:
+      DB_URL: "postgresql://${postgres.environment.POSTGRES_USER}@${postgres.hostname}/mydb"
+```
+
+Composed reads `env_file` and component `environment:` blocks at build time so cross-references resolve. Preloaded values stay in the env file -- they don't leak into the output.
+
 ### Mix anything
 
 Combine three source types in one file:
@@ -86,9 +105,27 @@ Combine three source types in one file:
 |--------|-----------|---------|
 | Helm chart | `x-helm` | `chart: oci://ghcr.io/org/chart` |
 | Compose file | `x-compose-file` | `file: ./other/docker-compose.yaml` |
+| Shell command | `x-shell` | `command: "vault kv get ..."` |
 | Docker image | *(none)* | `image: postgres:16` |
 
 Services without `x-` extensions pass through unchanged -- your `composed.yaml` works with `docker compose up` directly for plain images.
+
+### Host commands during build
+
+Run shell commands as part of the build pipeline with `x-shell`. Useful for authentication, code generation, or any prep step that must happen before services start:
+
+```yaml
+x-shell:
+  sso-token: "vault kv get -field=token secret/myapp"
+
+services:
+  app:
+    image: myapp
+    environment:
+      TOKEN: "${sso-token}"
+```
+
+Three syntax tiers: named shorthand (`x-shell: { name: "cmd" }`), named long form with options, and inline `${shell:cmd}` for one-off values.
 
 ### Flexible Helm values
 
@@ -140,7 +177,7 @@ composed up                                # docker compose up
 - [Installation](getting-started/installation.md) -- Install options: Homebrew, binary, Go.
 - [Quick Start](getting-started/quick-start.md) -- Full walkthrough with a real Helm chart.
 - [Config File](guide/config-file.md) -- Format, service types, build pipeline.
-- [Extensions](guide/extensions.md) -- `x-helm`, `x-compose-file`, `x-exports`, and direct references.
+- [Extensions](guide/extensions.md) -- `x-helm`, `x-compose-file`, `x-shell`, `x-exports`, and direct references.
 - [Translation Rules](guide/translation-rules.md) -- How K8s resources map to Compose.
 - [CLI Reference](cli/init.md) -- Every command and flag.
 

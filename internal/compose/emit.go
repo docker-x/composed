@@ -69,8 +69,15 @@ func emitVolumes(doc *yaml.Node, volumes map[string]*Volume) {
 	for _, name := range sortedKeys(volumes) {
 		v := volumes[name]
 		inner := &yaml.Node{Kind: yaml.MappingNode}
-		if v.Driver != "" && v.Driver != "local" {
-			addScalar(inner, "driver", v.Driver)
+		if v.External {
+			addBool(inner, "external", true)
+			if v.Name != "" {
+				addScalar(inner, "name", v.Name)
+			}
+		} else {
+			if v.Driver != "" && v.Driver != "local" {
+				addScalar(inner, "driver", v.Driver)
+			}
 		}
 		// Empty mapping = default volume
 		if len(inner.Content) == 0 {
@@ -142,6 +149,9 @@ func addServiceCore(n *yaml.Node, svc *Service) {
 			addScalar(envNode, k, svc.Environment[k])
 		}
 		n.Content = append(n.Content, scalarNode("environment"), envNode)
+	}
+	if len(svc.EnvFile) > 0 {
+		addSeq(n, "env_file", svc.EnvFile)
 	}
 	if len(svc.Ports) > 0 {
 		addSeq(n, "ports", svc.Ports)
@@ -275,6 +285,13 @@ func addInt(parent *yaml.Node, key string, val int) {
 	parent.Content = append(parent.Content,
 		scalarNode(key),
 		&yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprintf("%d", val), Tag: "!!int"},
+	)
+}
+
+func addBool(parent *yaml.Node, key string, val bool) {
+	parent.Content = append(parent.Content,
+		scalarNode(key),
+		&yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprintf("%t", val), Tag: "!!bool"},
 	)
 }
 
