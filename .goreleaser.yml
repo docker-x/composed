@@ -61,7 +61,7 @@ homebrew_casks:
       verified: github.com/docker-x/composed
     hooks:
       post:
-        install: xattr -r -d com.apple.quarantine "#{caskroom}"
+        install: system "xattr", "-r", "-d", "com.apple.quarantine", "#{caskroom}"
     zap:
       trash:
         - "~/.config/composed"
