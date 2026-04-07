@@ -494,7 +494,3 @@ volumes:
 3. **Helm hooks** — Pre-install/post-install hooks are Jobs with annotations.
    Should we translate them to one-shot services with `profiles:` so they don't
    run by default? Worth considering.
-
-4. **DCPE integration** — The extension would call this binary via
-   `ddClient.docker.cli.exec("run", ["--rm", "composed:latest", "build", ...])`.
-   Or we embed the binary in the extension image. TBD.
