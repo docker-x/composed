@@ -59,9 +59,6 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     url:
       verified: github.com/docker-x/composed
-    hooks:
-      post:
-        install: system "xattr", "-r", "-d", "com.apple.quarantine", "#{caskroom}"
     zap:
       trash:
         - "~/.config/composed"
