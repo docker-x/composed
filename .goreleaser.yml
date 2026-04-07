@@ -49,18 +49,22 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-brews:
-  - repository:
-      owner: docker-x
-      name: homebrew-tap
-    name: composed
+homebrew_casks:
+  - name: composed
     homepage: https://github.com/docker-x/composed
     description: Compose anything into a Docker Compose file
-    license: Apache-2.0
-    install: |
-      bin.install "composed"
-    test: |
-      system "#{bin}/composed", "--version"
+    repository:
+      owner: docker-x
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    url:
+      verified: github.com/docker-x/composed
+    hooks:
+      post:
+        install: xattr -r -d com.apple.quarantine "#{caskroom}"
+    zap:
+      trash:
+        - "~/.config/composed"
 
 changelog:
   sort: asc
