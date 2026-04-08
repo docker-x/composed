@@ -782,9 +782,13 @@ func TestPreloadComposeExports(t *testing.T) {
 
 	// Write a component compose file with environment and env_file
 	compDir := filepath.Join(dir, "pgvector")
-	os.MkdirAll(compDir, 0755)
+	if err := os.MkdirAll(compDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	envContent := "EXTRA_FROM_FILE=fromenv\n"
-	os.WriteFile(filepath.Join(compDir, ".env"), []byte(envContent), 0644)
+	if err := os.WriteFile(filepath.Join(compDir, ".env"), []byte(envContent), 0644); err != nil {
+		t.Fatalf("WriteFile .env: %v", err)
+	}
 
 	composeContent := `services:
   postgres:
@@ -796,7 +800,9 @@ func TestPreloadComposeExports(t *testing.T) {
       - .env
 `
 	composeFile := filepath.Join(compDir, "compose.yaml")
-	os.WriteFile(composeFile, []byte(composeContent), 0644)
+	if err := os.WriteFile(composeFile, []byte(composeContent), 0644); err != nil {
+		t.Fatalf("WriteFile compose.yaml: %v", err)
+	}
 
 	// Write composed.yaml
 	composedContent := `name: test
@@ -807,7 +813,9 @@ services:
       OVERRIDE_KEY: from-composed
 `
 	composedFile := filepath.Join(dir, "composed.yaml")
-	os.WriteFile(composedFile, []byte(composedContent), 0644)
+	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
+		t.Fatalf("WriteFile composed.yaml: %v", err)
+	}
 
 	// Set buildFile so relative paths resolve
 	oldBuildFile := buildFile
@@ -851,7 +859,9 @@ func TestPreloadComposeExports_XExportsBackwardCompat(t *testing.T) {
       port: "5432"
 `
 	composeFile := filepath.Join(dir, "db-compose.yaml")
-	os.WriteFile(composeFile, []byte(composeContent), 0644)
+	if err := os.WriteFile(composeFile, []byte(composeContent), 0644); err != nil {
+		t.Fatalf("WriteFile db-compose.yaml: %v", err)
+	}
 
 	composedContent := `name: test
 services:
@@ -859,7 +869,9 @@ services:
     x-compose-file: ./db-compose.yaml
 `
 	composedFile := filepath.Join(dir, "composed.yaml")
-	os.WriteFile(composedFile, []byte(composedContent), 0644)
+	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
+		t.Fatalf("WriteFile composed.yaml: %v", err)
+	}
 
 	oldBuildFile := buildFile
 	buildFile = composedFile

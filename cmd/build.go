@@ -149,9 +149,9 @@ func doBuild() error {
 // so preloaded keys can be stripped after ref resolution.
 func snapshotEnvKeys(cfg *config.File) map[string]map[string]bool {
 	origEnvKeys := make(map[string]map[string]bool)
-	for name, svc := range cfg.Services {
+	for name := range cfg.Services {
 		keys := make(map[string]bool)
-		for k := range svc.Environment {
+		for k := range cfg.Services[name].Environment {
 			keys[k] = true
 		}
 		origEnvKeys[name] = keys
@@ -378,8 +378,8 @@ func findRawService(services map[string]rawServiceStruct, name string) (rawServi
 		return t, true
 	}
 	if len(services) == 1 {
-		for _, t := range services {
-			return t, true
+		for k := range services {
+			return services[k], true
 		}
 	}
 	return rawServiceStruct{}, false
