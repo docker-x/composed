@@ -2,6 +2,7 @@
 //
 // composed.yaml extends Docker Compose format with x- extensions:
 //   - x-helm:         Helm chart rendering configuration
+//   - x-k8s:          Raw K8s manifest directory/file (generic K8s-to-Compose)
 //   - x-compose-file: Include an external compose file
 //   - x-shell:        Top-level shell commands (run during build, stdout captured)
 //   - x-exports:      Values exposed to other services via ${service.key}
@@ -138,6 +139,7 @@ type Service struct {
 
 	// Composed extensions (x- prefix = ignored by docker compose)
 	XHelm        *HelmExtension    `yaml:"x-helm,omitempty"`
+	XK8s         *K8sExtension     `yaml:"x-k8s,omitempty"`
 	XComposeFile string            `yaml:"x-compose-file,omitempty"`
 	XExports     map[string]string `yaml:"x-exports,omitempty"`
 }
@@ -151,6 +153,15 @@ type HelmExtension struct {
 	ValuesFile string                 `yaml:"values_file,omitempty"`
 }
 
+// K8sExtension holds configuration for reading raw K8s manifests.
+// This is the generic form of what x-helm does internally — it accepts
+// K8s YAML from any source (cdk8s, kustomize, hand-written, etc.) and
+// translates it to Compose.
+type K8sExtension struct {
+	Path    string `yaml:"path"`              // Directory of *.yaml files or a single file
+	Command string `yaml:"command,omitempty"` // Optional command to run before reading (e.g. "cdk8s synth")
+}
+
 // Healthcheck mirrors the Docker Compose healthcheck config.
 type Healthcheck struct {
 	Test     []string `yaml:"test"`
@@ -161,11 +172,15 @@ type Healthcheck struct {
 
 // ServiceType returns the component type based on x- extensions:
 //   - "helm"    if x-helm is set
+//   - "k8s"     if x-k8s is set
 //   - "compose" if x-compose-file is set
 //   - "image"   otherwise (plain compose service)
 func ServiceType(svc *Service) string {
 	if svc.XHelm != nil {
 		return "helm"
+	}
+	if svc.XK8s != nil {
+		return "k8s"
 	}
 	if svc.XComposeFile != "" {
 		return "compose"

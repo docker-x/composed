@@ -47,6 +47,7 @@ Source type is auto-detected:
 - `oci://...` → probes OCI registry manifest (`config.mediaType`) to distinguish helm charts from images
 - `*.yaml` / `*.yml` file → compose file include
 - Directory with `Chart.yaml` → local helm chart
+- Directory with K8s YAML files (containing `kind:` and `apiVersion:`) → K8s manifests
 - `repo/chart` (with `--repo`) → helm chart repository
 - Everything else → Docker image
 
@@ -125,6 +126,7 @@ A service's type is determined by which `x-` extension it has:
 | Has | Type | Behavior |
 |-----|------|----------|
 | `x-helm` | helm | Chart is rendered via `helm template`, K8s manifests are translated to compose |
+| `x-k8s` | k8s | K8s YAML manifests are read from a directory/file and translated to compose |
 | `x-compose-file` | compose | External compose file is parsed and merged into output |
 | (neither) | image | Standard compose service, passed through as-is |
 
@@ -142,6 +144,48 @@ services:
           tag: main-stable
       values_file: ./redis-values.yaml                         # Values file (passed as -f to helm)
 ```
+
+### `x-k8s` — Kubernetes manifests (generic)
+
+`x-k8s` is the generic form of what `x-helm` does internally. It reads
+Kubernetes YAML manifests from a directory or file and translates them to
+Docker Compose using the same K8s-to-Compose pipeline. This supports any
+tool that produces standard K8s manifests: cdk8s, kustomize, Timoni, Tanka,
+hand-written YAML, or anything else.
+
+```yaml
+services:
+  my-app:
+    x-k8s:
+      path: ./k8s/manifests                # directory of *.yaml files or a single file
+```
+
+With an optional pre-build command:
+
+```yaml
+services:
+  my-app:
+    x-k8s:
+      command: "cdk8s synth"               # run before reading manifests
+      path: ./my-cdk8s-app/dist            # where to find K8s YAML after command runs
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `path` | yes | — | Directory of K8s YAML files (globbed as `*.yaml` + `*.yml`) or a single YAML file |
+| `command` | no | — | Shell command to run before reading manifests (e.g. `cdk8s synth`, `kustomize build -o dir/`) |
+
+**Execution rules:**
+- If `command` is set, it runs before reading `path` (with a 60-second timeout).
+- `path` is resolved relative to `composed.yaml`.
+- If `path` is a directory, all `*.yaml` and `*.yml` files in it are concatenated
+  (non-recursive — only top-level files).
+- The concatenated YAML is fed through the same `k8s.Parse` → `translate.Translate`
+  pipeline used by `x-helm`.
+
+**Relationship to `x-helm`:** `x-helm` is effectively sugar for
+"run `helm template`, then do the standard K8s-to-Compose translation."
+`x-k8s` exposes the second half directly, accepting manifests from any source.
 
 ### `x-compose-file` — Include external compose file
 
@@ -366,14 +410,16 @@ name. This lets you replace a chart's auto-created volume with an external one.
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────┐     ┌────────────┐     ┌─────────┐
-│  Helm SDK   │────>│  Parser  │────>│ Translator │────>│ Emitter │──> compose YAML
-│ (fetch+tmpl)│     │ (multi-  │     │ (k8s → IR) │     │ (IR →   │
-│             │     │  doc)    │     │            │     │  YAML)  │
-└─────────────┘     └──────────┘     └────────────┘     └─────────┘
-      ▲                  ▲                                    │
-      │                  │                                    │
-  render cmd         convert cmd                          stdout / -o
+                                    ┌──────────┐     ┌────────────┐     ┌─────────┐
+┌─────────────┐                     │  Parser  │     │ Translator │     │ Emitter │
+│  Helm SDK   │────────────────────>│ (multi-  │────>│ (k8s → IR) │────>│ (IR →   │──> compose YAML
+│ (fetch+tmpl)│                     │  doc)    │     │            │     │  YAML)  │
+└─────────────┘                     └──────────┘     └────────────┘     └─────────┘
+                                         ▲                                    │
+┌─────────────┐                          │                                    │
+│  K8s YAML   │──── (dir/file read) ─────┘                                stdout / -o
+│ (cdk8s, etc)│
+└─────────────┘
 ```
 
 ### Package Layout

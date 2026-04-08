@@ -63,6 +63,24 @@ func TestServiceType(t *testing.T) {
 			},
 			want: "helm",
 		},
+		{
+			name: "k8s service",
+			svc:  Service{XK8s: &K8sExtension{Path: "./manifests"}},
+			want: "k8s",
+		},
+		{
+			name: "k8s with command",
+			svc:  Service{XK8s: &K8sExtension{Path: "./dist", Command: "cdk8s synth"}},
+			want: "k8s",
+		},
+		{
+			name: "helm takes priority over k8s",
+			svc: Service{
+				XHelm: &HelmExtension{Chart: testChartBitnamiRedis},
+				XK8s:  &K8sExtension{Path: "./manifests"},
+			},
+			want: "helm",
+		},
 	}
 
 	for _, tt := range tests {
@@ -119,6 +137,31 @@ func checkComposeFile(t *testing.T, f *File) {
 	svc := f.Services["monitoring"]
 	if svc.XComposeFile != "./monitoring/docker-compose.yaml" {
 		t.Errorf("XComposeFile = %q", svc.XComposeFile)
+	}
+}
+
+func checkK8sExtension(t *testing.T, f *File) {
+	t.Helper()
+	svc := f.Services["my-app"]
+	if svc.XK8s == nil {
+		t.Fatal("XK8s is nil")
+	}
+	if svc.XK8s.Path != "./k8s/manifests" {
+		t.Errorf("Path = %q, want %q", svc.XK8s.Path, "./k8s/manifests")
+	}
+}
+
+func checkK8sExtensionWithCommand(t *testing.T, f *File) {
+	t.Helper()
+	svc := f.Services["my-app"]
+	if svc.XK8s == nil {
+		t.Fatal("XK8s is nil")
+	}
+	if svc.XK8s.Path != "./dist" {
+		t.Errorf("Path = %q, want %q", svc.XK8s.Path, "./dist")
+	}
+	if svc.XK8s.Command != "cdk8s synth" {
+		t.Errorf("Command = %q, want %q", svc.XK8s.Command, "cdk8s synth")
 	}
 }
 
@@ -285,6 +328,29 @@ services:
     x-compose-file: ./monitoring/docker-compose.yaml
 `,
 			check: checkComposeFile,
+		},
+		{
+			name: "k8s extension parsed",
+			input: `
+name: test
+services:
+  my-app:
+    x-k8s:
+      path: ./k8s/manifests
+`,
+			check: checkK8sExtension,
+		},
+		{
+			name: "k8s extension with command",
+			input: `
+name: test
+services:
+  my-app:
+    x-k8s:
+      path: ./dist
+      command: "cdk8s synth"
+`,
+			check: checkK8sExtensionWithCommand,
 		},
 		{
 			name: "exports parsed",
