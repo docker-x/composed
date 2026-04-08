@@ -814,7 +814,7 @@ func loadEnvFile(path string) map[string]string {
 		}
 		return nil
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only file, close error is harmless
 
 	result := make(map[string]string)
 	scanner := bufio.NewScanner(f)
