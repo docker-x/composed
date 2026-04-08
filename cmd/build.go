@@ -106,16 +106,7 @@ func doBuild() error {
 
 	// 2b. Pre-load env_file vars and compose-component environment into
 	// config services so ResolveRefs can see them for cross-references.
-	// Record original keys so we can strip the preloaded ones afterward
-	// (they're only needed for resolution, not for the output).
-	origEnvKeys := make(map[string]map[string]bool)
-	for name, svc := range cfg.Services {
-		keys := make(map[string]bool)
-		for k := range svc.Environment {
-			keys[k] = true
-		}
-		origEnvKeys[name] = keys
-	}
+	origEnvKeys := snapshotEnvKeys(cfg)
 	preloadServiceEnvFiles(cfg)
 	preloadComposeExports(cfg)
 
@@ -125,20 +116,7 @@ func doBuild() error {
 	}
 
 	// 3b. Strip preloaded env keys — keep only what composed.yaml declared.
-	for name := range cfg.Services {
-		svc := cfg.Services[name]
-		if svc.Environment != nil {
-			for k := range svc.Environment {
-				if !origEnvKeys[name][k] {
-					delete(svc.Environment, k)
-				}
-			}
-			if len(svc.Environment) == 0 {
-				svc.Environment = nil
-			}
-		}
-		cfg.Services[name] = svc
-	}
+	stripPreloadedEnvKeys(cfg, origEnvKeys)
 
 	// 4. Process each service → compose fragment
 	fragments, err := processServices(cfg)
@@ -164,6 +142,46 @@ func doBuild() error {
 		buildFile, strings.Join(names, ", "))
 
 	// 9. Emit
+	return emitOutput(merged)
+}
+
+// snapshotEnvKeys records the original environment keys per service
+// so preloaded keys can be stripped after ref resolution.
+func snapshotEnvKeys(cfg *config.File) map[string]map[string]bool {
+	origEnvKeys := make(map[string]map[string]bool)
+	for name, svc := range cfg.Services {
+		keys := make(map[string]bool)
+		for k := range svc.Environment {
+			keys[k] = true
+		}
+		origEnvKeys[name] = keys
+	}
+	return origEnvKeys
+}
+
+// stripPreloadedEnvKeys removes environment keys that were added by
+// preloadServiceEnvFiles / preloadComposeExports — they were only
+// needed for cross-reference resolution, not for the output.
+func stripPreloadedEnvKeys(cfg *config.File, origEnvKeys map[string]map[string]bool) {
+	for name := range cfg.Services {
+		svc := cfg.Services[name]
+		if svc.Environment == nil {
+			continue
+		}
+		for k := range svc.Environment {
+			if !origEnvKeys[name][k] {
+				delete(svc.Environment, k)
+			}
+		}
+		if len(svc.Environment) == 0 {
+			svc.Environment = nil
+		}
+		cfg.Services[name] = svc
+	}
+}
+
+// emitOutput writes the merged compose file to the configured output.
+func emitOutput(merged *compose.File) error {
 	out, err := compose.Emit(merged)
 	if err != nil {
 		return fmt.Errorf("emit: %w", err)
@@ -270,28 +288,35 @@ func overlayServiceFields(frag *compose.File, name string, svc *config.Service) 
 // and loads their KEY=VALUE pairs into each service's Environment map.
 // Inline environment entries always win (fill-gaps only).
 func preloadServiceEnvFiles(cfg *config.File) {
+	cfgDir := filepath.Dir(buildFile)
 	for name := range cfg.Services {
 		svc := cfg.Services[name]
 		if len(svc.EnvFile) == 0 {
 			continue
 		}
-		if svc.Environment == nil {
-			svc.Environment = make(map[string]string)
-		}
-		cfgDir := filepath.Dir(buildFile)
-		for _, ef := range svc.EnvFile {
-			p := ef
-			if !filepath.IsAbs(p) {
-				p = filepath.Join(cfgDir, p)
-			}
-			for k, v := range loadEnvFile(p) {
-				if _, exists := svc.Environment[k]; !exists {
-					svc.Environment[k] = v
-				}
-			}
-		}
+		svc.Environment = loadEnvFilesInto(svc.Environment, svc.EnvFile, cfgDir)
 		cfg.Services[name] = svc
 	}
+}
+
+// loadEnvFilesInto loads KEY=VALUE pairs from env files into the given
+// environment map (creating it if nil). Existing keys are never overwritten.
+func loadEnvFilesInto(env map[string]string, files []string, baseDir string) map[string]string {
+	if env == nil {
+		env = make(map[string]string)
+	}
+	for _, ef := range files {
+		p := ef
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(baseDir, p)
+		}
+		for k, v := range loadEnvFile(p) {
+			if _, exists := env[k]; !exists {
+				env[k] = v
+			}
+		}
+	}
+	return env
 }
 
 // preloadComposeExports reads x-compose-file targets and copies their
@@ -305,70 +330,92 @@ func preloadComposeExports(cfg *config.File) {
 		if svc.XComposeFile == "" {
 			continue
 		}
-		path := svc.XComposeFile
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(filepath.Dir(buildFile), path)
+		if preloadOneComposeExport(&svc, name) {
+			cfg.Services[name] = svc
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot read component %s for %q: %v\n", path, name, err)
-			continue
-		}
-		var raw struct {
-			Services map[string]rawServiceStruct `yaml:"services"`
-		}
-		if err := yamlUnmarshal(data, &raw); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot parse component %s for %q: %v\n", path, name, err)
-			continue
-		}
-		// Find the service (match by name, or use the only one)
-		var target rawServiceStruct
-		var found bool
-		if t, ok := raw.Services[name]; ok {
-			target, found = t, true
-		} else if len(raw.Services) == 1 {
-			for _, t := range raw.Services {
-				target, found = t, true
-			}
-		}
-		if !found {
-			continue
-		}
+	}
+}
 
-		// 1. Copy x-exports (backward compat)
-		if len(target.XExports) > 0 && len(svc.XExports) == 0 {
-			svc.XExports = target.XExports
-		}
+// preloadOneComposeExport loads x-exports and environment from a single
+// x-compose-file component into the config service. Returns true if svc was modified.
+func preloadOneComposeExport(svc *config.Service, name string) bool {
+	path := svc.XComposeFile
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(filepath.Dir(buildFile), path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot read component %s for %q: %v\n", path, name, err)
+		return false
+	}
+	var raw struct {
+		Services map[string]rawServiceStruct `yaml:"services"`
+	}
+	if err := yamlUnmarshal(data, &raw); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot parse component %s for %q: %v\n", path, name, err)
+		return false
+	}
+	target, found := findRawService(raw.Services, name)
+	if !found {
+		return false
+	}
 
-		// 2. Load component's environment + env_file into config for ref resolution.
-		//    Build a merged map: env_file vars first, then inline environment on top.
-		compEnv := make(map[string]string)
-		compDir := filepath.Dir(path)
-		for _, ef := range parseEnvFileList(target.EnvFile) {
-			if !filepath.IsAbs(ef) {
-				ef = filepath.Join(compDir, ef)
-			}
-			for k, v := range loadEnvFile(ef) {
-				compEnv[k] = v
-			}
-		}
-		for k, v := range parseEnvironment(target.Environment) {
-			compEnv[k] = v // inline environment wins over env_file
-		}
+	// 1. Copy x-exports (backward compat)
+	if len(target.XExports) > 0 && len(svc.XExports) == 0 {
+		svc.XExports = target.XExports
+	}
 
-		// Fill gaps in config service's Environment (composed.yaml entries win)
-		if len(compEnv) > 0 {
-			if svc.Environment == nil {
-				svc.Environment = make(map[string]string)
-			}
-			for k, v := range compEnv {
-				if _, exists := svc.Environment[k]; !exists {
-					svc.Environment[k] = v
-				}
-			}
-		}
+	// 2. Load component's environment + env_file into config for ref resolution.
+	compEnv := buildComponentEnv(target, filepath.Dir(path))
+	mergeEnvGaps(svc, compEnv)
+	return true
+}
 
-		cfg.Services[name] = svc
+// findRawService locates a service in the raw map by name, falling back
+// to the only entry if there's exactly one service.
+func findRawService(services map[string]rawServiceStruct, name string) (rawServiceStruct, bool) {
+	if t, ok := services[name]; ok {
+		return t, true
+	}
+	if len(services) == 1 {
+		for _, t := range services {
+			return t, true
+		}
+	}
+	return rawServiceStruct{}, false
+}
+
+// buildComponentEnv merges env_file and inline environment from a raw
+// service definition. Inline environment wins over env_file.
+func buildComponentEnv(target rawServiceStruct, compDir string) map[string]string {
+	compEnv := make(map[string]string)
+	for _, ef := range parseEnvFileList(target.EnvFile) {
+		if !filepath.IsAbs(ef) {
+			ef = filepath.Join(compDir, ef)
+		}
+		for k, v := range loadEnvFile(ef) {
+			compEnv[k] = v
+		}
+	}
+	for k, v := range parseEnvironment(target.Environment) {
+		compEnv[k] = v // inline environment wins over env_file
+	}
+	return compEnv
+}
+
+// mergeEnvGaps fills missing environment keys in svc from compEnv.
+// composed.yaml entries always win (existing keys are never overwritten).
+func mergeEnvGaps(svc *config.Service, compEnv map[string]string) {
+	if len(compEnv) == 0 {
+		return
+	}
+	if svc.Environment == nil {
+		svc.Environment = make(map[string]string)
+	}
+	for k, v := range compEnv {
+		if _, exists := svc.Environment[k]; !exists {
+			svc.Environment[k] = v
+		}
 	}
 }
 

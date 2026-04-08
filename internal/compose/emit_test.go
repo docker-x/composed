@@ -7,6 +7,7 @@ import (
 
 const (
 	testImageNginx = "nginx:latest"
+	testImageApp   = "app:latest"
 	errFmtEmit     = "Emit error: %v"
 )
 
@@ -204,7 +205,7 @@ func TestEmit_DeterministicOrder(t *testing.T) {
 
 func TestEmit_Volumes(t *testing.T) {
 	f := NewFile()
-	f.Services["app"] = NewService("app:latest")
+	f.Services["app"] = NewService(testImageApp)
 	f.Volumes["data"] = &Volume{}
 	f.Volumes["custom"] = &Volume{Driver: "nfs"}
 
@@ -250,7 +251,7 @@ func TestEmit_RestartPolicy(t *testing.T) {
 
 func TestEmit_ConfigFile(t *testing.T) {
 	f := NewFile()
-	f.Services["app"] = NewService("app:latest")
+	f.Services["app"] = NewService(testImageApp)
 	f.Configs["from-file"] = &Config{File: "./config.yaml"}
 
 	out, err := Emit(f)
@@ -265,7 +266,7 @@ func TestEmit_ConfigFile(t *testing.T) {
 
 func TestEmit_ExternalVolume(t *testing.T) {
 	f := NewFile()
-	f.Services["app"] = NewService("app:latest")
+	f.Services["app"] = NewService(testImageApp)
 	f.Volumes["data"] = &Volume{External: true, Name: "my-ext-vol"}
 
 	out, err := Emit(f)
@@ -283,7 +284,7 @@ func TestEmit_ExternalVolume(t *testing.T) {
 
 func TestEmit_ExternalVolumeNoName(t *testing.T) {
 	f := NewFile()
-	f.Services["app"] = NewService("app:latest")
+	f.Services["app"] = NewService(testImageApp)
 	f.Volumes["data"] = &Volume{External: true}
 
 	out, err := Emit(f)

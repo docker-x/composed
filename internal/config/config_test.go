@@ -19,6 +19,11 @@ func findShellEntry(entries []NamedShellEntry, name string) (ShellEntry, bool) {
 const (
 	testChartBitnamiRedis = "bitnami/redis"
 	testImagePostgres     = "postgres:15-alpine"
+	testShellNameSSO      = "sso-token"
+	testSecretToken       = "my-secret-token"
+	errFmtParse           = "Parse error: %v"
+	errFmtResolve         = "ResolveRefs error: %v"
+	errFmtName            = "Name = %q, want %q"
 )
 
 func TestServiceType(t *testing.T) {
@@ -72,7 +77,7 @@ func TestServiceType(t *testing.T) {
 func checkMinimalConfig(t *testing.T, f *File) {
 	t.Helper()
 	if f.Name != "my-stack" {
-		t.Errorf("Name = %q, want %q", f.Name, "my-stack")
+		t.Errorf(errFmtName, f.Name, "my-stack")
 	}
 	if len(f.Services) != 1 {
 		t.Fatalf("Services count = %d, want 1", len(f.Services))
@@ -175,7 +180,7 @@ func checkEmptyConfig(t *testing.T, f *File) {
 
 func checkTopLevelShellShorthand(t *testing.T, f *File) {
 	t.Helper()
-	entry, ok := findShellEntry(f.XShell, "sso-token")
+	entry, ok := findShellEntry(f.XShell, testShellNameSSO)
 	if !ok {
 		t.Fatal("x-shell entry 'sso-token' not found")
 	}
@@ -189,7 +194,7 @@ func checkTopLevelShellShorthand(t *testing.T, f *File) {
 
 func checkTopLevelShellLongForm(t *testing.T, f *File) {
 	t.Helper()
-	entry, ok := findShellEntry(f.XShell, "sso-token")
+	entry, ok := findShellEntry(f.XShell, testShellNameSSO)
 	if !ok {
 		t.Fatal("x-shell entry 'sso-token' not found")
 	}
@@ -428,7 +433,7 @@ services:
 			t.Fatalf("Load() error: %v", err)
 		}
 		if f.Name != "test" {
-			t.Errorf("Name = %q, want %q", f.Name, "test")
+			t.Errorf(errFmtName, f.Name, "test")
 		}
 		if f.Services["web"].Image != "nginx:latest" {
 			t.Errorf("Image = %q", f.Services["web"].Image)
@@ -744,10 +749,10 @@ services:
 		t.Run(tt.name, func(t *testing.T) {
 			f, err := Parse([]byte(tt.input))
 			if err != nil {
-				t.Fatalf("Parse error: %v", err)
+				t.Fatalf(errFmtParse, err)
 			}
 			if err := f.ResolveRefs(nil); err != nil {
-				t.Fatalf("ResolveRefs error: %v", err)
+				t.Fatalf(errFmtResolve, err)
 			}
 			tt.check(t, f)
 		})
@@ -851,29 +856,39 @@ services:
       host: postgres
 `))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 
 	shellValues := map[string]string{
-		"sso-token": "my-secret-token",
+		testShellNameSSO: testSecretToken,
 	}
 
 	if err := f.ResolveRefs(shellValues); err != nil {
-		t.Fatalf("ResolveRefs error: %v", err)
+		t.Fatalf(errFmtResolve, err)
 	}
 
 	app := f.Services["app"]
-	if app.Environment["TOKEN"] != "my-secret-token" {
-		t.Errorf("TOKEN = %q, want %q", app.Environment["TOKEN"], "my-secret-token")
+	if app.Environment["TOKEN"] != testSecretToken {
+		t.Errorf("TOKEN = %q, want %q", app.Environment["TOKEN"], testSecretToken)
 	}
 	if app.Environment["HOST"] != "postgres" {
 		t.Errorf("HOST = %q, want %q", app.Environment["HOST"], "postgres")
 	}
 }
 
+// parseTestConfig is a test helper that parses YAML and fails the test on error.
+func parseTestConfig(t *testing.T, input string) *File {
+	t.Helper()
+	f, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf(errFmtParse, err)
+	}
+	return f
+}
+
 func TestParseVolumes(t *testing.T) {
 	t.Run("external volume with name", func(t *testing.T) {
-		f, err := Parse([]byte(`
+		f := parseTestConfig(t, `
 name: test
 services:
   app:
@@ -882,10 +897,7 @@ volumes:
   data:
     external: true
     name: litellm-ext-db
-`))
-		if err != nil {
-			t.Fatalf("Parse error: %v", err)
-		}
+`)
 		vol, ok := f.Volumes["data"]
 		if !ok {
 			t.Fatal("volume 'data' not found")
@@ -894,12 +906,12 @@ volumes:
 			t.Error("External should be true")
 		}
 		if vol.Name != "litellm-ext-db" {
-			t.Errorf("Name = %q, want %q", vol.Name, "litellm-ext-db")
+			t.Errorf(errFmtName, vol.Name, "litellm-ext-db")
 		}
 	})
 
 	t.Run("volume with driver", func(t *testing.T) {
-		f, err := Parse([]byte(`
+		f := parseTestConfig(t, `
 name: test
 services:
   app:
@@ -907,10 +919,7 @@ services:
 volumes:
   logs:
     driver: tmpfs
-`))
-		if err != nil {
-			t.Fatalf("Parse error: %v", err)
-		}
+`)
 		vol := f.Volumes["logs"]
 		if vol.Driver != "tmpfs" {
 			t.Errorf("Driver = %q, want %q", vol.Driver, "tmpfs")
@@ -921,32 +930,26 @@ volumes:
 	})
 
 	t.Run("empty volume", func(t *testing.T) {
-		f, err := Parse([]byte(`
+		f := parseTestConfig(t, `
 name: test
 services:
   app:
     image: myapp
 volumes:
   data:
-`))
-		if err != nil {
-			t.Fatalf("Parse error: %v", err)
-		}
+`)
 		if _, ok := f.Volumes["data"]; !ok {
 			t.Fatal("volume 'data' not found")
 		}
 	})
 
 	t.Run("no volumes", func(t *testing.T) {
-		f, err := Parse([]byte(`
+		f := parseTestConfig(t, `
 name: test
 services:
   app:
     image: myapp
-`))
-		if err != nil {
-			t.Fatalf("Parse error: %v", err)
-		}
+`)
 		if f.Volumes == nil {
 			t.Fatal("Volumes should be initialized, not nil")
 		}
@@ -966,11 +969,11 @@ services:
       GREETING: "${shell:echo inline-hello}"
 `))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 
 	if err := f.ResolveRefs(nil); err != nil {
-		t.Fatalf("ResolveRefs error: %v", err)
+		t.Fatalf(errFmtResolve, err)
 	}
 
 	app := f.Services["app"]
@@ -989,11 +992,11 @@ services:
       BAD: "${shell:false}"
 `))
 	if err != nil {
-		t.Fatalf("Parse error: %v", err)
+		t.Fatalf(errFmtParse, err)
 	}
 
 	if err := f.ResolveRefs(nil); err != nil {
-		t.Fatalf("ResolveRefs error: %v", err)
+		t.Fatalf(errFmtResolve, err)
 	}
 
 	app := f.Services["app"]

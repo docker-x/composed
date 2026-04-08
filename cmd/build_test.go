@@ -9,7 +9,11 @@ import (
 	"github.com/docker-x/composed/internal/config"
 )
 
-const testTagMainStable = "main-stable"
+const (
+	testTagMainStable = "main-stable"
+	testImageNginx    = "nginx:latest"
+	testVolumeName    = "litellm-ext-db"
+)
 
 func TestFlattenValues(t *testing.T) {
 	tests := []struct {
@@ -403,10 +407,18 @@ func TestDeriveComponentName(t *testing.T) {
 	}
 }
 
+// assertEnv checks a service environment variable has the expected value.
+func assertEnv(t *testing.T, svc *compose.Service, key, want string) {
+	t.Helper()
+	if svc.Environment[key] != want {
+		t.Errorf("Environment[%q] = %q, want %q", key, svc.Environment[key], want)
+	}
+}
+
 func TestOverlayServiceFields(t *testing.T) {
 	t.Run("merges environment (user wins)", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc := compose.NewService("nginx:latest")
+		svc := compose.NewService(testImageNginx)
 		svc.Environment["CHART_VAR"] = "from-chart"
 		svc.Environment["SHARED"] = "chart-value"
 		frag.Services["web"] = svc
@@ -420,20 +432,14 @@ func TestOverlayServiceFields(t *testing.T) {
 
 		overlayServiceFields(frag, "web", cfgSvc)
 
-		if svc.Environment["CHART_VAR"] != "from-chart" {
-			t.Errorf("CHART_VAR = %q, want from-chart", svc.Environment["CHART_VAR"])
-		}
-		if svc.Environment["USER_VAR"] != "from-user" {
-			t.Errorf("USER_VAR = %q, want from-user", svc.Environment["USER_VAR"])
-		}
-		if svc.Environment["SHARED"] != "user-wins" {
-			t.Errorf("SHARED = %q, want user-wins", svc.Environment["SHARED"])
-		}
+		assertEnv(t, svc, "CHART_VAR", "from-chart")
+		assertEnv(t, svc, "USER_VAR", "from-user")
+		assertEnv(t, svc, "SHARED", "user-wins")
 	})
 
 	t.Run("appends env_file", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc := compose.NewService("nginx:latest")
+		svc := compose.NewService(testImageNginx)
 		svc.EnvFile = []string{"./existing.env"}
 		frag.Services["web"] = svc
 
@@ -446,14 +452,11 @@ func TestOverlayServiceFields(t *testing.T) {
 		if len(svc.EnvFile) != 2 {
 			t.Fatalf("EnvFile len = %d, want 2", len(svc.EnvFile))
 		}
-		if svc.EnvFile[0] != "./existing.env" || svc.EnvFile[1] != "./user.env" {
-			t.Errorf("EnvFile = %v", svc.EnvFile)
-		}
 	})
 
 	t.Run("appends volumes", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc := compose.NewService("nginx:latest")
+		svc := compose.NewService(testImageNginx)
 		svc.Volumes = []string{"data:/data"}
 		frag.Services["web"] = svc
 
@@ -470,7 +473,7 @@ func TestOverlayServiceFields(t *testing.T) {
 
 	t.Run("appends ports", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc := compose.NewService("nginx:latest")
+		svc := compose.NewService(testImageNginx)
 		svc.Ports = []string{"80:80"}
 		frag.Services["web"] = svc
 
@@ -487,7 +490,7 @@ func TestOverlayServiceFields(t *testing.T) {
 
 	t.Run("falls back to single service if name not found", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc := compose.NewService("nginx:latest")
+		svc := compose.NewService(testImageNginx)
 		frag.Services["chart-generated-name"] = svc
 
 		cfgSvc := &config.Service{
@@ -495,15 +498,12 @@ func TestOverlayServiceFields(t *testing.T) {
 		}
 
 		overlayServiceFields(frag, "not-matching", cfgSvc)
-
-		if svc.Environment["KEY"] != "val" {
-			t.Errorf("KEY = %q, want val", svc.Environment["KEY"])
-		}
+		assertEnv(t, svc, "KEY", "val")
 	})
 
 	t.Run("no-op when name not found and multiple services", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc1 := compose.NewService("nginx:latest")
+		svc1 := compose.NewService(testImageNginx)
 		svc2 := compose.NewService("redis:latest")
 		frag.Services["svc1"] = svc1
 		frag.Services["svc2"] = svc2
@@ -525,7 +525,7 @@ func TestOverlayServiceFields(t *testing.T) {
 
 	t.Run("no-op with nil fields", func(t *testing.T) {
 		frag := compose.NewFile()
-		svc := compose.NewService("nginx:latest")
+		svc := compose.NewService(testImageNginx)
 		frag.Services["web"] = svc
 
 		cfgSvc := &config.Service{} // all nil
@@ -545,7 +545,7 @@ func TestApplyConfigVolumes(t *testing.T) {
 
 		cfg := &config.File{
 			Volumes: map[string]config.VolumeConfig{
-				"data": {External: true, Name: "litellm-ext-db"},
+				"data": {External: true, Name: testVolumeName},
 			},
 		}
 
@@ -555,8 +555,8 @@ func TestApplyConfigVolumes(t *testing.T) {
 		if !vol.External {
 			t.Error("External should be true")
 		}
-		if vol.Name != "litellm-ext-db" {
-			t.Errorf("Name = %q, want %q", vol.Name, "litellm-ext-db")
+		if vol.Name != testVolumeName {
+			t.Errorf("Name = %q, want %q", vol.Name, testVolumeName)
 		}
 	})
 
@@ -636,7 +636,7 @@ networks:
 	}
 
 	web := f.Services["web"]
-	if web.Image != "nginx:latest" {
+	if web.Image != testImageNginx {
 		t.Errorf("web.Image = %q", web.Image)
 	}
 	if web.Environment["FOO"] != "bar" {

@@ -190,41 +190,8 @@ func parseShellEntries(node *yaml.Node) ([]NamedShellEntry, error) {
 // field lookup (environment, hostname, image, ports).
 // shellValues contains captured stdout from x-shell entries.
 func (f *File) ResolveRefs(shellValues map[string]string) error {
-	// Build export index: service_name.key → value
-	exports := make(map[string]string)
-	for name := range f.Services {
-		svc := f.Services[name]
-		for k, v := range svc.XExports {
-			exports[name+"."+k] = v
-		}
-	}
-	// Add shell values as top-level names (no dot needed).
-	// Warn if a shell name shadows an existing export key.
-	for name, val := range shellValues {
-		if prev, exists := exports[name]; exists {
-			fmt.Fprintf(os.Stderr, "Warning: x-shell %q shadows export %q (was %q)\n", name, name, prev)
-		}
-		exports[name] = val
-	}
-
-	// Snapshot services before mutation so direct references always read
-	// original (pre-resolution) values regardless of map iteration order.
-	snapshot := make(map[string]Service, len(f.Services))
-	for name := range f.Services {
-		svc := f.Services[name]
-		cp := svc
-		if svc.Environment != nil {
-			cp.Environment = make(map[string]string, len(svc.Environment))
-			for k, v := range svc.Environment {
-				cp.Environment[k] = v
-			}
-		}
-		if svc.Ports != nil {
-			cp.Ports = make([]string, len(svc.Ports))
-			copy(cp.Ports, svc.Ports)
-		}
-		snapshot[name] = cp
-	}
+	exports := buildExportIndex(f, shellValues)
+	snapshot := snapshotServices(f.Services)
 
 	// Resolve in all services
 	for name := range f.Services {
@@ -240,6 +207,48 @@ func (f *File) ResolveRefs(shellValues map[string]string) error {
 		f.Services[name] = svc
 	}
 	return nil
+}
+
+// buildExportIndex creates a lookup map for x-exports and shell values.
+func buildExportIndex(f *File, shellValues map[string]string) map[string]string {
+	exports := make(map[string]string)
+	for name := range f.Services {
+		svc := f.Services[name]
+		for k, v := range svc.XExports {
+			exports[name+"."+k] = v
+		}
+	}
+	// Add shell values as top-level names (no dot needed).
+	// Warn if a shell name shadows an existing export key.
+	for name, val := range shellValues {
+		if prev, exists := exports[name]; exists {
+			fmt.Fprintf(os.Stderr, "Warning: x-shell %q shadows export %q (was %q)\n", name, name, prev)
+		}
+		exports[name] = val
+	}
+	return exports
+}
+
+// snapshotServices deep-copies services so direct references always read
+// original (pre-resolution) values regardless of map iteration order.
+func snapshotServices(services map[string]Service) map[string]Service {
+	snapshot := make(map[string]Service, len(services))
+	for name := range services {
+		svc := services[name]
+		cp := svc
+		if svc.Environment != nil {
+			cp.Environment = make(map[string]string, len(svc.Environment))
+			for k, v := range svc.Environment {
+				cp.Environment[k] = v
+			}
+		}
+		if svc.Ports != nil {
+			cp.Ports = make([]string, len(svc.Ports))
+			copy(cp.Ports, svc.Ports)
+		}
+		snapshot[name] = cp
+	}
+	return snapshot
 }
 
 // refPattern matches ${...} placeholders.
