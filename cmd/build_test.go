@@ -918,3 +918,32 @@ func TestImageToCompose_EnvFile(t *testing.T) {
 		t.Errorf("Environment[FOO] = %q, want bar", cs.Environment["FOO"])
 	}
 }
+
+func TestLoadEnvFile_SingleCharQuote(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, ".env")
+	// Single quote character as value should not panic
+	content := "NORMAL=hello\nBAD_DOUBLE=\"\nBAD_SINGLE='\nGOOD=\"world\"\n"
+	if err := os.WriteFile(envFile, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	result := loadEnvFile(envFile)
+	if result == nil {
+		t.Fatal("loadEnvFile returned nil")
+	}
+	if result["NORMAL"] != "hello" {
+		t.Errorf("NORMAL = %q, want hello", result["NORMAL"])
+	}
+	// Single char quote should be kept as-is (not stripped)
+	if result["BAD_DOUBLE"] != `"` {
+		t.Errorf("BAD_DOUBLE = %q, want single double-quote", result["BAD_DOUBLE"])
+	}
+	if result["BAD_SINGLE"] != `'` {
+		t.Errorf("BAD_SINGLE = %q, want single single-quote", result["BAD_SINGLE"])
+	}
+	// Properly paired quotes should be stripped
+	if result["GOOD"] != "world" {
+		t.Errorf("GOOD = %q, want world", result["GOOD"])
+	}
+}

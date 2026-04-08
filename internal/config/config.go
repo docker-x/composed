@@ -53,8 +53,47 @@ func (f *FlexStringSlice) UnmarshalYAML(value *yaml.Node) error {
 type File struct {
 	Name     string                  `yaml:"name"`
 	Services map[string]Service      `yaml:"services"`
-	Volumes  map[string]VolumeConfig `yaml:"volumes"`
+	Volumes  map[string]VolumeConfig `yaml:"volumes,omitempty"`
 	XShell   []NamedShellEntry       `yaml:"-"`
+}
+
+// MarshalYAML implements yaml.Marshaler for File, ensuring x-shell entries
+// are included in the output despite the yaml:"-" tag (needed because
+// x-shell uses polymorphic YAML that requires custom parsing).
+func (f File) MarshalYAML() (interface{}, error) {
+	// Build a proxy struct with the standard fields.
+	type plain struct {
+		Name     string                  `yaml:"name"`
+		XShell   yaml.Node               `yaml:"x-shell,omitempty"`
+		Services map[string]Service      `yaml:"services"`
+		Volumes  map[string]VolumeConfig `yaml:"volumes,omitempty"`
+	}
+	p := plain{
+		Name:     f.Name,
+		Services: f.Services,
+		Volumes:  f.Volumes,
+	}
+
+	if len(f.XShell) > 0 {
+		p.XShell = yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		for _, named := range f.XShell {
+			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: named.Name, Tag: "!!str"}
+			if named.Entry.AllowFailure {
+				// Long form: {command: "...", allow_failure: true}
+				var valNode yaml.Node
+				if err := valNode.Encode(named.Entry); err != nil {
+					return nil, err
+				}
+				p.XShell.Content = append(p.XShell.Content, keyNode, &valNode)
+			} else {
+				// Shorthand: "command"
+				valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: named.Entry.Command, Tag: "!!str"}
+				p.XShell.Content = append(p.XShell.Content, keyNode, valNode)
+			}
+		}
+	}
+
+	return &p, nil
 }
 
 // NamedShellEntry pairs a shell entry name with its definition,

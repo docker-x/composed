@@ -841,8 +841,9 @@ func loadEnvFile(path string) map[string]string {
 			continue
 		}
 		// Strip matched quote pairs only
-		if (strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`)) ||
-			(strings.HasPrefix(v, `'`) && strings.HasSuffix(v, `'`)) {
+		if len(v) >= 2 &&
+			((strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`)) ||
+				(strings.HasPrefix(v, `'`) && strings.HasSuffix(v, `'`))) {
 			v = v[1 : len(v)-1]
 		}
 		result[k] = v

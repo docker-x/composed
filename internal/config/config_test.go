@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // findShellEntry looks up a named shell entry in an ordered slice.
@@ -1037,5 +1040,48 @@ services:
 	}
 	if len(f2.Services["app"].EnvFile) != 2 {
 		t.Errorf("list env_file length = %d, want 2", len(f2.Services["app"].EnvFile))
+	}
+}
+
+func TestFileMarshalYAML_PreservesXShell(t *testing.T) {
+	f := &File{
+		Name:     "test",
+		Services: map[string]Service{"app": {Image: "myapp"}},
+		XShell: []NamedShellEntry{
+			{Name: "token", Entry: ShellEntry{Command: "vault read secret"}},
+			{Name: "risky", Entry: ShellEntry{Command: "flaky-cmd", AllowFailure: true}},
+		},
+	}
+
+	data, err := yaml.Marshal(f)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	out := string(data)
+
+	// x-shell section must appear in marshaled output
+	if !strings.Contains(out, "x-shell:") {
+		t.Errorf("marshaled output missing x-shell section:\n%s", out)
+	}
+	if !strings.Contains(out, "token:") {
+		t.Errorf("marshaled output missing 'token' entry:\n%s", out)
+	}
+	if !strings.Contains(out, "vault read secret") {
+		t.Errorf("marshaled output missing command text:\n%s", out)
+	}
+
+	// Round-trip: re-parse and verify
+	f2, err := Parse(data)
+	if err != nil {
+		t.Fatalf("re-Parse: %v", err)
+	}
+	if len(f2.XShell) != 2 {
+		t.Fatalf("XShell length = %d, want 2", len(f2.XShell))
+	}
+	if f2.XShell[0].Name != "token" || f2.XShell[0].Entry.Command != "vault read secret" {
+		t.Errorf("XShell[0] = %+v, want token/vault read secret", f2.XShell[0])
+	}
+	if f2.XShell[1].Name != "risky" || !f2.XShell[1].Entry.AllowFailure {
+		t.Errorf("XShell[1] = %+v, want risky/allow_failure=true", f2.XShell[1])
 	}
 }
