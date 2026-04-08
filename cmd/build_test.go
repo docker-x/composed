@@ -10,9 +10,11 @@ import (
 )
 
 const (
-	testTagMainStable = "main-stable"
-	testImageNginx    = "nginx:latest"
-	testVolumeName    = "litellm-ext-db"
+	testTagMainStable    = "main-stable"
+	testImageNginx       = "nginx:latest"
+	testVolumeName       = "litellm-ext-db"
+	testComposedYAMLFile = "composed.yaml"
+	errFmtConfigLoad     = "config.Load: %v"
 )
 
 func TestFlattenValues(t *testing.T) {
@@ -812,7 +814,7 @@ services:
     environment:
       OVERRIDE_KEY: from-composed
 `
-	composedFile := filepath.Join(dir, "composed.yaml")
+	composedFile := filepath.Join(dir, testComposedYAMLFile)
 	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
 		t.Fatalf("WriteFile composed.yaml: %v", err)
 	}
@@ -824,7 +826,7 @@ services:
 
 	cfg, err := config.Load(composedFile)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(errFmtConfigLoad, err)
 	}
 
 	preloadComposeExports(cfg)
@@ -868,7 +870,7 @@ services:
   db:
     x-compose-file: ./db-compose.yaml
 `
-	composedFile := filepath.Join(dir, "composed.yaml")
+	composedFile := filepath.Join(dir, testComposedYAMLFile)
 	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
 		t.Fatalf("WriteFile composed.yaml: %v", err)
 	}
@@ -879,7 +881,7 @@ services:
 
 	cfg, err := config.Load(composedFile)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(errFmtConfigLoad, err)
 	}
 
 	preloadComposeExports(cfg)
@@ -1053,6 +1055,47 @@ func TestReadK8sManifests_MissingPath(t *testing.T) {
 	}
 }
 
+func TestK8sManifestsToCompose_EmptyPath(t *testing.T) {
+	svc := &config.Service{
+		XK8s: &config.K8sExtension{Path: ""},
+	}
+	_, err := k8sManifestsToCompose("test", svc)
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+	if !containsSubstring(err.Error(), "requires a path") {
+		t.Errorf("error = %q, want mention of 'requires a path'", err)
+	}
+}
+
+// writeComposedAndLoadK8s writes composed.yaml in dir, sets buildFile,
+// loads config, and calls k8sManifestsToCompose for the given service name.
+// It returns the compose fragment. The caller must not rely on buildFile
+// after the test — it is restored via t.Cleanup.
+func writeComposedAndLoadK8s(t *testing.T, dir, composedContent, svcName string) *compose.File {
+	t.Helper()
+	composedFile := filepath.Join(dir, testComposedYAMLFile)
+	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBuildFile := buildFile
+	buildFile = composedFile
+	t.Cleanup(func() { buildFile = oldBuildFile })
+
+	cfg, err := config.Load(composedFile)
+	if err != nil {
+		t.Fatalf(errFmtConfigLoad, err)
+	}
+
+	svc := cfg.Services[svcName]
+	frag, err := k8sManifestsToCompose(svcName, &svc)
+	if err != nil {
+		t.Fatalf("k8sManifestsToCompose: %v", err)
+	}
+	return frag
+}
+
 func TestK8sManifestsToCompose_Integration(t *testing.T) {
 	dir := t.TempDir()
 
@@ -1102,33 +1145,13 @@ spec:
 		t.Fatal(err)
 	}
 
-	// Write composed.yaml
 	composedContent := `name: test
 services:
   my-app:
     x-k8s:
       path: ./manifests
 `
-	composedFile := filepath.Join(dir, "composed.yaml")
-	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Set buildFile so relative paths resolve
-	oldBuildFile := buildFile
-	buildFile = composedFile
-	defer func() { buildFile = oldBuildFile }()
-
-	cfg, err := config.Load(composedFile)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-
-	svc := cfg.Services["my-app"]
-	frag, err := k8sManifestsToCompose("my-app", &svc)
-	if err != nil {
-		t.Fatalf("k8sManifestsToCompose: %v", err)
-	}
+	frag := writeComposedAndLoadK8s(t, dir, composedContent, "my-app")
 
 	// Should have translated the Deployment into a compose service
 	webSvc, ok := frag.Services["web"]
@@ -1181,25 +1204,7 @@ services:
       command: "sh ` + scriptPath + `"
       path: ` + outputDir + `
 `
-	composedFile := filepath.Join(dir, "composed.yaml")
-	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	oldBuildFile := buildFile
-	buildFile = composedFile
-	defer func() { buildFile = oldBuildFile }()
-
-	cfg, err := config.Load(composedFile)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-
-	svc := cfg.Services["gen-app"]
-	frag, err := k8sManifestsToCompose("gen-app", &svc)
-	if err != nil {
-		t.Fatalf("k8sManifestsToCompose: %v", err)
-	}
+	frag := writeComposedAndLoadK8s(t, dir, composedContent, "gen-app")
 
 	genSvc, ok := frag.Services["generated"]
 	if !ok {

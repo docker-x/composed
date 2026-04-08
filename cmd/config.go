@@ -266,7 +266,7 @@ func resolveAddArgs(args []string) (name, source string, err error) {
 	case 2:
 		name, source = args[0], args[1]
 		if hasExplicitFlags {
-			return "", "", fmt.Errorf("provide either a positional source or --chart/--image/--compose-file, not both")
+			return "", "", fmt.Errorf("provide either a positional source or --chart/--image/--compose-file/--k8s-path, not both")
 		}
 	case 1:
 		if hasExplicitFlags {

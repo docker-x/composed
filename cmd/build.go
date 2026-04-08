@@ -556,6 +556,9 @@ func helmToCompose(name string, svc *config.Service) (*compose.File, error) {
 // what helmToCompose does after helm template.
 func k8sManifestsToCompose(name string, svc *config.Service) (*compose.File, error) {
 	k := svc.XK8s
+	if k.Path == "" {
+		return nil, fmt.Errorf("x-k8s requires a path")
+	}
 	manifestPath := k.Path
 	if !filepath.IsAbs(manifestPath) {
 		manifestPath = filepath.Join(filepath.Dir(buildFile), manifestPath)

@@ -24,6 +24,8 @@ const (
 	testImagePostgres     = "postgres:15-alpine"
 	testShellNameSSO      = "sso-token"
 	testSecretToken       = "my-secret-token"
+	testK8sDistPath       = "./dist"
+	testK8sCdk8sSynth     = "cdk8s synth"
 	errFmtParse           = "Parse error: %v"
 	errFmtResolve         = "ResolveRefs error: %v"
 	errFmtName            = "Name = %q, want %q"
@@ -70,7 +72,7 @@ func TestServiceType(t *testing.T) {
 		},
 		{
 			name: "k8s with command",
-			svc:  Service{XK8s: &K8sExtension{Path: "./dist", Command: "cdk8s synth"}},
+			svc:  Service{XK8s: &K8sExtension{Path: testK8sDistPath, Command: testK8sCdk8sSynth}},
 			want: "k8s",
 		},
 		{
@@ -157,11 +159,11 @@ func checkK8sExtensionWithCommand(t *testing.T, f *File) {
 	if svc.XK8s == nil {
 		t.Fatal("XK8s is nil")
 	}
-	if svc.XK8s.Path != "./dist" {
-		t.Errorf("Path = %q, want %q", svc.XK8s.Path, "./dist")
+	if svc.XK8s.Path != testK8sDistPath {
+		t.Errorf("Path = %q, want %q", svc.XK8s.Path, testK8sDistPath)
 	}
-	if svc.XK8s.Command != "cdk8s synth" {
-		t.Errorf("Command = %q, want %q", svc.XK8s.Command, "cdk8s synth")
+	if svc.XK8s.Command != testK8sCdk8sSynth {
+		t.Errorf("Command = %q, want %q", svc.XK8s.Command, testK8sCdk8sSynth)
 	}
 }
 
