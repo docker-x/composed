@@ -107,8 +107,8 @@ composed down
 ## composed.yaml Format
 
 `composed.yaml` is a Docker Compose file with `x-` extensions. Plain services
-work with `docker compose up` directly. Services with `x-helm` or
-`x-compose-file` need `composed build` first.
+work with `docker compose up` directly. Files with `x-helm`, `x-compose-file`,
+or `x-shell` entries need `composed build` first.
 
 ```yaml
 name: my-stack
@@ -196,6 +196,64 @@ services:
 
 **Priority**: x-exports checked first (explicit wins), then direct field lookup.
 Best for plain image services. For Helm services, use x-exports (fields are empty until build).
+
+## x-shell (host commands during build)
+
+Top-level key that runs shell commands and captures stdout as referenceable values.
+Three syntax tiers:
+
+```yaml
+# 1. Named shorthand — stdout becomes ${name}
+x-shell:
+  sso-token: "vault kv get -field=token secret/myapp"
+
+# 2. Named long form — with options
+x-shell:
+  sso-token:
+    command: "vault kv get -field=token secret/myapp"
+    allow_failure: true
+
+# 3. Inline — one-off, no name needed
+services:
+  app:
+    environment:
+      TOKEN: "${shell:vault kv get -field=token secret/myapp}"
+```
+
+Shell entries run before all other processing. Named values share the reference namespace with x-exports.
+
+## Component pattern (x-compose-file)
+
+Components should be generic infrastructure (no hardcoded credentials). The
+consumer provides credentials via `environment:` or `env_file:` in composed.yaml.
+
+```yaml
+# pgvector/compose.yaml — reusable, no credentials
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+```
+
+```yaml
+# composed.yaml — consumer provides credentials
+services:
+  postgres:
+    x-compose-file: ./pgvector/compose.yaml
+    env_file:
+      - ./postgres.env     # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+
+  app:
+    image: my-app:latest
+    environment:
+      DATABASE_URL: "postgresql://${postgres.environment.POSTGRES_USER}:${postgres.environment.POSTGRES_PASSWORD}@${postgres.hostname}/mydb"
+```
+
+Cross-refs resolve from: inline `environment:` > `env_file:` entries > component
+`environment:` > component `env_file:`. Preloaded values are for resolution only
+— they don't leak into the output.
 
 ## Values merge priority
 

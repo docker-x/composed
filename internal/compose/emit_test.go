@@ -7,6 +7,7 @@ import (
 
 const (
 	testImageNginx = "nginx:latest"
+	testImageApp   = "app:latest"
 	errFmtEmit     = "Emit error: %v"
 )
 
@@ -204,7 +205,7 @@ func TestEmit_DeterministicOrder(t *testing.T) {
 
 func TestEmit_Volumes(t *testing.T) {
 	f := NewFile()
-	f.Services["app"] = NewService("app:latest")
+	f.Services["app"] = NewService(testImageApp)
 	f.Volumes["data"] = &Volume{}
 	f.Volumes["custom"] = &Volume{Driver: "nfs"}
 
@@ -250,7 +251,7 @@ func TestEmit_RestartPolicy(t *testing.T) {
 
 func TestEmit_ConfigFile(t *testing.T) {
 	f := NewFile()
-	f.Services["app"] = NewService("app:latest")
+	f.Services["app"] = NewService(testImageApp)
 	f.Configs["from-file"] = &Config{File: "./config.yaml"}
 
 	out, err := Emit(f)
@@ -263,6 +264,43 @@ func TestEmit_ConfigFile(t *testing.T) {
 	}
 }
 
+func TestEmit_ExternalVolume(t *testing.T) {
+	f := NewFile()
+	f.Services["app"] = NewService(testImageApp)
+	f.Volumes["data"] = &Volume{External: true, Name: "my-ext-vol"}
+
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+
+	if !strings.Contains(out, "external: true") {
+		t.Error("missing external: true")
+	}
+	if !strings.Contains(out, "name: my-ext-vol") {
+		t.Error("missing name: my-ext-vol")
+	}
+}
+
+func TestEmit_ExternalVolumeNoName(t *testing.T) {
+	f := NewFile()
+	f.Services["app"] = NewService(testImageApp)
+	f.Volumes["data"] = &Volume{External: true}
+
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+
+	if !strings.Contains(out, "external: true") {
+		t.Error("missing external: true")
+	}
+	// No name: line should appear
+	if strings.Contains(out, "name:") {
+		t.Error("should not emit name when empty")
+	}
+}
+
 func TestEmit_EmptyFile(t *testing.T) {
 	f := NewFile()
 	out, err := Emit(f)
@@ -272,5 +310,34 @@ func TestEmit_EmptyFile(t *testing.T) {
 	// Should produce valid YAML with no services/volumes/etc
 	if strings.Contains(out, "services:") {
 		t.Error("empty file should not have services section")
+	}
+}
+
+func TestEmit_VolumeNameNonExternal(t *testing.T) {
+	f := NewFile()
+	f.Volumes["data"] = &Volume{Name: "shared-db"}
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+	if !strings.Contains(out, "name: shared-db") {
+		t.Error("non-external volume should emit name: when set")
+	}
+}
+
+func TestEmit_ServiceEnvFile(t *testing.T) {
+	f := NewFile()
+	svc := NewService(testImageApp)
+	svc.EnvFile = []string{"./app.env", "./extra.env"}
+	f.Services["app"] = svc
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+	if !strings.Contains(out, "env_file:") {
+		t.Error("should emit env_file section")
+	}
+	if !strings.Contains(out, "app.env") {
+		t.Error("should contain app.env in output")
 	}
 }

@@ -151,6 +151,111 @@ services:
     x-compose-file: ./monitoring/docker-compose.yaml
 ```
 
+#### Component pattern
+
+Components should define infrastructure only — image, healthcheck, ports,
+volumes. Credentials and configuration belong in the consumer's `composed.yaml`,
+passed via `environment:` or `env_file:`.
+
+```yaml
+# pgvector/compose.yaml — reusable component (no credentials)
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+
+volumes:
+  pgvector-data:
+```
+
+```yaml
+# composed.yaml — consumer provides credentials
+services:
+  postgres:
+    x-compose-file: ./pgvector/compose.yaml
+    env_file:
+      - ./postgres.env       # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+
+  app:
+    image: my-app:latest
+    environment:
+      DATABASE_URL: "postgresql://${postgres.environment.POSTGRES_USER}:${postgres.environment.POSTGRES_PASSWORD}@${postgres.hostname}/mydb"
+    depends_on:
+      - postgres
+```
+
+At build time, `composed` reads `env_file` entries and component `environment:`
+blocks to make values available for `${service.environment.KEY}` cross-references.
+Preloaded values are used only for resolution — they are not duplicated in the
+output.
+
+### `x-shell` — Run host commands during build (top-level)
+
+`x-shell` is a **top-level** key (not inside `services:`). It runs shell commands
+on the host during `composed build` and captures their stdout as referenceable
+values. Shell entries are not services — they produce no containers.
+
+Three syntax tiers:
+
+#### 1. Top-level shorthand (string value = command, stdout = value)
+
+```yaml
+x-shell:
+  sso-token: "vault kv get -field=token secret/myapp"
+
+services:
+  app:
+    image: myapp
+    environment:
+      TOKEN: "${sso-token}"
+```
+
+`${sso-token}` resolves to the trimmed stdout of the command.
+
+#### 2. Top-level long form (map value = command + options)
+
+```yaml
+x-shell:
+  sso-token:
+    command: "vault kv get -field=token secret/myapp"
+    allow_failure: true
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `command` | yes | — | Shell command (passed to `sh -c`), stdout is captured |
+| `allow_failure` | no | `false` | If `true`, non-zero exit logs a warning instead of aborting |
+
+#### 3. Inline shell reference
+
+```yaml
+services:
+  app:
+    image: myapp
+    environment:
+      TOKEN: "${shell:vault kv get -field=token secret/myapp}"
+```
+
+`${shell:...}` executes the command inline and substitutes stdout. No naming
+needed. If the same command appears multiple times, it runs multiple times —
+use the named form for shared values.
+
+#### Execution rules
+
+- All `x-shell` entries run **before** any other processing (helm rendering,
+  compose merging, reference resolution).
+- Named entries (`x-shell` map) run in declaration order.
+- Inline `${shell:...}` references are resolved during reference resolution,
+  after named shells have run.
+- Stdout is trimmed of leading/trailing whitespace.
+- Named shell values participate in the same reference namespace as `x-exports`
+  — `${name}` resolves to stdout.
+
 ### `x-exports` — Cross-service references
 
 ```yaml
@@ -214,11 +319,49 @@ values in `x-exports` is redundant. For Helm services, `x-exports` remains
 the primary mechanism since the service fields are empty in `composed.yaml`
 (they're generated at build time).
 
+#### Resolution sources for `${service.environment.KEY}`
+
+The environment lookup resolves from multiple sources (highest priority first):
+
+1. **Inline `environment:`** in `composed.yaml`
+2. **`env_file:` entries** in `composed.yaml` (parsed at build time)
+3. **Component `environment:`** from the `x-compose-file` target
+4. **Component `env_file:`** from the `x-compose-file` target
+
+Sources 2–4 are preloaded for resolution only — they do not appear as explicit
+`environment:` entries in the output. The `env_file:` directive is passed through
+to Docker Compose, which loads the values at container start.
+
 ### Standard compose fields
 
 All standard Docker Compose service fields work as-is on any service:
 `image`, `environment`, `ports`, `volumes`, `command`, `entrypoint`,
 `healthcheck`, `labels`, `depends_on`, `restart`, etc.
+
+### Top-level `volumes:`
+
+Top-level `volumes:` in `composed.yaml` are passed through to the output. This
+is standard Docker Compose syntax. Use it to declare external volumes, set
+drivers, or override chart-generated volume names.
+
+```yaml
+volumes:
+  data:
+    external: true
+    name: litellm-ext-db    # use an existing Docker volume
+
+  logs:
+    driver: local            # explicit driver (default is "local")
+```
+
+| Field | Description |
+|-------|-------------|
+| `external` | If `true`, the volume must already exist (Docker won't create it) |
+| `name` | The actual Docker volume name (when different from the key) |
+| `driver` | Volume driver (default: `local`) |
+
+User-declared volumes take priority over chart-generated volumes of the same
+name. This lets you replace a chart's auto-created volume with an external one.
 
 ## Architecture
 
