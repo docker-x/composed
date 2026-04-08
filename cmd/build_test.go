@@ -10,9 +10,11 @@ import (
 )
 
 const (
-	testTagMainStable = "main-stable"
-	testImageNginx    = "nginx:latest"
-	testVolumeName    = "litellm-ext-db"
+	testTagMainStable    = "main-stable"
+	testImageNginx       = "nginx:latest"
+	testVolumeName       = "litellm-ext-db"
+	testComposedYAMLFile = "composed.yaml"
+	errFmtConfigLoad     = "config.Load: %v"
 )
 
 func TestFlattenValues(t *testing.T) {
@@ -812,7 +814,7 @@ services:
     environment:
       OVERRIDE_KEY: from-composed
 `
-	composedFile := filepath.Join(dir, "composed.yaml")
+	composedFile := filepath.Join(dir, testComposedYAMLFile)
 	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
 		t.Fatalf("WriteFile composed.yaml: %v", err)
 	}
@@ -824,7 +826,7 @@ services:
 
 	cfg, err := config.Load(composedFile)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(errFmtConfigLoad, err)
 	}
 
 	preloadComposeExports(cfg)
@@ -868,7 +870,7 @@ services:
   db:
     x-compose-file: ./db-compose.yaml
 `
-	composedFile := filepath.Join(dir, "composed.yaml")
+	composedFile := filepath.Join(dir, testComposedYAMLFile)
 	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
 		t.Fatalf("WriteFile composed.yaml: %v", err)
 	}
@@ -879,7 +881,7 @@ services:
 
 	cfg, err := config.Load(composedFile)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf(errFmtConfigLoad, err)
 	}
 
 	preloadComposeExports(cfg)
@@ -946,4 +948,333 @@ func TestLoadEnvFile_SingleCharQuote(t *testing.T) {
 	if result["GOOD"] != "world" {
 		t.Errorf("GOOD = %q, want world", result["GOOD"])
 	}
+}
+
+func TestReadK8sManifests_SingleFile(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+`
+	path := filepath.Join(dir, "deploy.yaml")
+	if err := os.WriteFile(path, []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := readK8sManifests(path)
+	if err != nil {
+		t.Fatalf("readK8sManifests error: %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Fatal("expected non-empty data")
+	}
+	content := string(data)
+	if !containsSubstring(content, "kind: Deployment") {
+		t.Errorf("expected content to contain 'kind: Deployment', got:\n%s", content)
+	}
+}
+
+func TestReadK8sManifests_Directory(t *testing.T) {
+	dir := t.TempDir()
+
+	deploy := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: myapp:latest
+`
+	svc := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 8080
+`
+	if err := os.WriteFile(filepath.Join(dir, "deployment.yaml"), []byte(deploy), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "service.yml"), []byte(svc), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Non-YAML file should be ignored
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# docs"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := readK8sManifests(dir)
+	if err != nil {
+		t.Fatalf("readK8sManifests error: %v", err)
+	}
+
+	content := string(data)
+	if !containsSubstring(content, "kind: Deployment") {
+		t.Error("expected Deployment in output")
+	}
+	if !containsSubstring(content, "kind: Service") {
+		t.Error("expected Service in output")
+	}
+	if containsSubstring(content, "# docs") {
+		t.Error("README.md should not be included")
+	}
+}
+
+func TestReadK8sManifests_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := readK8sManifests(dir)
+	if err == nil {
+		t.Fatal("expected error for empty directory")
+	}
+	if !containsSubstring(err.Error(), "no YAML files found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestReadK8sManifests_MissingPath(t *testing.T) {
+	_, err := readK8sManifests("/nonexistent/path")
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestK8sManifestsToCompose_EmptyPath(t *testing.T) {
+	svc := &config.Service{
+		XK8s: &config.K8sExtension{Path: ""},
+	}
+	_, err := k8sManifestsToCompose("test", svc)
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+	if !containsSubstring(err.Error(), "requires a path") {
+		t.Errorf("error = %q, want mention of 'requires a path'", err)
+	}
+}
+
+// writeComposedAndLoadK8s writes composed.yaml in dir, sets buildFile,
+// loads config, and calls k8sManifestsToCompose for the given service name.
+// It returns the compose fragment. The caller must not rely on buildFile
+// after the test — it is restored via t.Cleanup.
+func writeComposedAndLoadK8s(t *testing.T, dir, composedContent, svcName string) *compose.File {
+	t.Helper()
+	composedFile := filepath.Join(dir, testComposedYAMLFile)
+	if err := os.WriteFile(composedFile, []byte(composedContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBuildFile := buildFile
+	buildFile = composedFile
+	t.Cleanup(func() { buildFile = oldBuildFile })
+
+	cfg, err := config.Load(composedFile)
+	if err != nil {
+		t.Fatalf(errFmtConfigLoad, err)
+	}
+
+	svc := cfg.Services[svcName]
+	frag, err := k8sManifestsToCompose(svcName, &svc)
+	if err != nil {
+		t.Fatalf("k8sManifestsToCompose: %v", err)
+	}
+	return frag
+}
+
+func TestK8sManifestsToCompose_Integration(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a K8s Deployment + Service
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: myapp:v1
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: LoadBalancer
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 8080
+`
+	manifestPath := filepath.Join(dir, "manifests")
+	if err := os.MkdirAll(manifestPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestPath, "app.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	composedContent := `name: test
+services:
+  my-app:
+    x-k8s:
+      path: ./manifests
+`
+	frag := writeComposedAndLoadK8s(t, dir, composedContent, "my-app")
+
+	// Should have translated the Deployment into a compose service
+	webSvc, ok := frag.Services["web"]
+	if !ok {
+		t.Fatalf("service 'web' not found in fragment, got: %v", serviceNames(frag))
+	}
+	if webSvc.Image != "myapp:v1" {
+		t.Errorf("Image = %q, want %q", webSvc.Image, "myapp:v1")
+	}
+	if webSvc.Environment["PORT"] != "8080" {
+		t.Errorf("Environment[PORT] = %q, want 8080", webSvc.Environment["PORT"])
+	}
+	// LoadBalancer port should be mapped
+	if len(webSvc.Ports) == 0 {
+		t.Error("expected port mappings from K8s Service")
+	}
+	// Replicas should be set
+	if webSvc.Deploy == nil || webSvc.Deploy.Replicas == nil || *webSvc.Deploy.Replicas != 2 {
+		t.Error("expected replicas=2 from Deployment spec")
+	}
+}
+
+func TestK8sManifestsToCompose_WithCommand(t *testing.T) {
+	dir := t.TempDir()
+
+	// The command will create the output directory and write a manifest
+	outputDir := filepath.Join(dir, "dist")
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generated
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: generated:latest
+`
+	// Pre-create the command that "generates" manifests
+	scriptPath := filepath.Join(dir, "generate.sh")
+	script := "#!/bin/sh\nmkdir -p " + outputDir + "\ncat > " + filepath.Join(outputDir, "app.yaml") + " << 'ENDOFYAML'\n" + manifest + "ENDOFYAML\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	composedContent := `name: test
+services:
+  gen-app:
+    x-k8s:
+      command: "sh ` + scriptPath + `"
+      path: ` + outputDir + `
+`
+	frag := writeComposedAndLoadK8s(t, dir, composedContent, "gen-app")
+
+	genSvc, ok := frag.Services["generated"]
+	if !ok {
+		t.Fatalf("service 'generated' not found, got: %v", serviceNames(frag))
+	}
+	if genSvc.Image != "generated:latest" {
+		t.Errorf("Image = %q, want %q", genSvc.Image, "generated:latest")
+	}
+}
+
+func TestIsK8sManifestDir(t *testing.T) {
+	t.Run("valid k8s dir", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n"
+		if err := os.WriteFile(filepath.Join(dir, "cm.yaml"), []byte(manifest), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if !isK8sManifestDir(dir) {
+			t.Error("expected true for directory with K8s manifests")
+		}
+	})
+
+	t.Run("compose dir (no kind/apiVersion)", func(t *testing.T) {
+		dir := t.TempDir()
+		composeContent := "services:\n  web:\n    image: nginx\n"
+		if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(composeContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if isK8sManifestDir(dir) {
+			t.Error("expected false for directory with compose file only")
+		}
+	})
+
+	t.Run("empty dir", func(t *testing.T) {
+		dir := t.TempDir()
+		if isK8sManifestDir(dir) {
+			t.Error("expected false for empty directory")
+		}
+	})
+
+	t.Run("non-yaml files only", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# hello"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if isK8sManifestDir(dir) {
+			t.Error("expected false for directory with no YAML files")
+		}
+	})
+}
+
+// containsSubstring is a test helper that checks if s contains substr.
+func containsSubstring(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsCheck(s, substr))
+}
+
+func containsCheck(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// serviceNames returns the names of services in a compose.File for error messages.
+func serviceNames(f *compose.File) []string {
+	names := make([]string, 0, len(f.Services))
+	for name := range f.Services {
+		names = append(names, name)
+	}
+	return names
 }

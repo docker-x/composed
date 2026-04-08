@@ -2,16 +2,19 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/docker-x/composed/internal/compose"
 	"github.com/docker-x/composed/internal/config"
 	"github.com/docker-x/composed/internal/helm"
+	"github.com/docker-x/composed/internal/k8s"
 	"github.com/docker-x/composed/internal/merge"
 	"github.com/docker-x/composed/internal/translate"
 	"github.com/spf13/cobra"
@@ -222,6 +225,8 @@ func processServices(cfg *config.File) ([]*compose.File, error) {
 			frag, fragErr = composeFragment(&svc)
 		case "helm":
 			frag, fragErr = helmToCompose(name, &svc)
+		case "k8s":
+			frag, fragErr = k8sManifestsToCompose(name, &svc)
 		default:
 			return nil, fmt.Errorf("service %q: unknown type %q", name, svcType)
 		}
@@ -543,8 +548,49 @@ func helmToCompose(name string, svc *config.Service) (*compose.File, error) {
 		return nil, fmt.Errorf("helm render: %w", err)
 	}
 
+	return translateK8sManifests(manifests, name)
+}
+
+// k8sManifestsToCompose reads K8s YAML manifests from a directory or file
+// and translates them to a Compose fragment. This is the generic form of
+// what helmToCompose does after helm template.
+func k8sManifestsToCompose(name string, svc *config.Service) (*compose.File, error) {
+	k := svc.XK8s
+	if k.Path == "" {
+		return nil, fmt.Errorf("x-k8s requires a path")
+	}
+	manifestPath := k.Path
+	if !filepath.IsAbs(manifestPath) {
+		manifestPath = filepath.Join(filepath.Dir(buildFile), manifestPath)
+	}
+
+	// Run optional pre-build command
+	if k.Command != "" {
+		fmt.Fprintf(os.Stderr, "  Running x-k8s command: %s\n", k.Command)
+		if err := runK8sCommand(k.Command); err != nil {
+			return nil, fmt.Errorf("x-k8s command: %w", err)
+		}
+	}
+
+	// Read manifests from path
+	data, err := readK8sManifests(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("read k8s manifests: %w", err)
+	}
+
+	manifests, err := k8s.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse k8s manifests: %w", err)
+	}
+
+	return translateK8sManifests(manifests, name)
+}
+
+// translateK8sManifests is the shared K8s-to-Compose translation step
+// used by both helmToCompose and k8sManifestsToCompose.
+func translateK8sManifests(manifests *k8s.Manifests, project string) (*compose.File, error) {
 	result, err := translate.Translate(manifests, translate.Opts{
-		Project: name,
+		Project: project,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("translate: %w", err)
@@ -552,6 +598,67 @@ func helmToCompose(name string, svc *config.Service) (*compose.File, error) {
 
 	result.Report.Print(os.Stderr)
 	return result.Compose, nil
+}
+
+// k8sCommandTimeout is the maximum time an x-k8s command may run.
+const k8sCommandTimeout = 60 * time.Second
+
+// runK8sCommand executes the x-k8s pre-build command with a timeout.
+func runK8sCommand(command string) error {
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		return fmt.Errorf("sh not found: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), k8sCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, shPath, "-c", command)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// readK8sManifests reads K8s YAML from a file or directory.
+// If path is a directory, all *.yaml and *.yml files are concatenated.
+// If path is a single file, its contents are returned directly.
+func readK8sManifests(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	if !info.IsDir() {
+		return os.ReadFile(path)
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("readdir %s: %w", path, err)
+	}
+
+	var buf []byte
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		lower := strings.ToLower(name)
+		if !strings.HasSuffix(lower, ".yaml") && !strings.HasSuffix(lower, ".yml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(path, name))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+		buf = append(buf, []byte("---\n")...)
+		buf = append(buf, data...)
+		buf = append(buf, '\n')
+	}
+
+	if len(buf) == 0 {
+		return nil, fmt.Errorf("no YAML files found in %s", path)
+	}
+
+	return buf, nil
 }
 
 // deepMerge merges src into dst recursively (src wins on conflict).

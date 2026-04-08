@@ -156,6 +156,7 @@ var (
 	addVersion    string
 	addImage      string
 	addCompFile   string
+	addK8sPath    string
 	addSets       []string
 	addValues     string // --values: load values file and merge inline
 	addValuesFile string // --values-file: store reference, load at build time
@@ -168,13 +169,14 @@ var (
 var addCmd = &cobra.Command{
 	Use:   "add [name] <source>",
 	Short: "Add a service to composed.yaml",
-	Long: `Add a Helm chart, Docker image, or compose file as a named service.
+	Long: `Add a Helm chart, Docker image, K8s manifests, or compose file as a named service.
 
 The source is auto-detected by probing the OCI registry manifest or
 inspecting the local filesystem:
   oci://...                     → probes registry (helm chart or image)
   *.yaml / *.yml file           → compose file include
   directory with Chart.yaml     → local helm chart
+  directory with K8s YAML files → K8s manifests (cdk8s, kustomize, etc.)
   repo/chart (with --repo)      → helm chart (repository)
   anything else                 → Docker image
 
@@ -238,6 +240,8 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 		svc = buildImageService()
 	case addCompFile != "":
 		svc = buildComposeService()
+	case addK8sPath != "":
+		svc = buildK8sService()
 	}
 
 	if len(addDependsOn) > 0 {
@@ -256,13 +260,13 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 }
 
 func resolveAddArgs(args []string) (name, source string, err error) {
-	hasExplicitFlags := addChart != "" || addImage != "" || addCompFile != ""
+	hasExplicitFlags := addChart != "" || addImage != "" || addCompFile != "" || addK8sPath != ""
 
 	switch len(args) {
 	case 2:
 		name, source = args[0], args[1]
 		if hasExplicitFlags {
-			return "", "", fmt.Errorf("provide either a positional source or --chart/--image/--compose-file, not both")
+			return "", "", fmt.Errorf("provide either a positional source or --chart/--image/--compose-file/--k8s-path, not both")
 		}
 	case 1:
 		if hasExplicitFlags {
@@ -282,6 +286,8 @@ func autoDetectSource(source string) {
 		addChart = source
 	case "compose":
 		addCompFile = source
+	case "k8s":
+		addK8sPath = source
 	case "image":
 		addImage = source
 	}
@@ -298,11 +304,14 @@ func validateServiceType() error {
 	if addCompFile != "" {
 		flagCount++
 	}
+	if addK8sPath != "" {
+		flagCount++
+	}
 	if flagCount == 0 {
-		return fmt.Errorf("specify a source: composed add <source>\nor use --chart, --image, or --compose-file")
+		return fmt.Errorf("specify a source: composed add <source>\nor use --chart, --image, --compose-file, or --k8s-path")
 	}
 	if flagCount > 1 {
-		return fmt.Errorf("ambiguous: specify only one of --chart, --image, or --compose-file")
+		return fmt.Errorf("ambiguous: specify only one of --chart, --image, --compose-file, or --k8s-path")
 	}
 	return nil
 }
@@ -360,6 +369,10 @@ func detectSourceType(source string) string {
 		if _, err := os.Stat(filepath.Join(source, "Chart.yaml")); err == nil {
 			return "helm"
 		}
+		// Check if the directory contains K8s manifests (YAML files with kind/apiVersion)
+		if isK8sManifestDir(source) {
+			return "k8s"
+		}
 	}
 
 	if addRepo != "" {
@@ -367,6 +380,33 @@ func detectSourceType(source string) string {
 	}
 
 	return "image"
+}
+
+// isK8sManifestDir returns true if the directory contains at least one YAML
+// file with K8s-like content (contains both "kind:" and "apiVersion:").
+func isK8sManifestDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(entry.Name())
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if strings.Contains(content, "kind:") && strings.Contains(content, "apiVersion:") {
+			return true
+		}
+	}
+	return false
 }
 
 func buildHelmService() (config.Service, error) {
@@ -453,6 +493,10 @@ func buildComposeService() config.Service {
 	return config.Service{XComposeFile: addCompFile}
 }
 
+func buildK8sService() config.Service {
+	return config.Service{XK8s: &config.K8sExtension{Path: addK8sPath}}
+}
+
 // parseSetValues converts ["key=val", "nested.key=val"] into a nested map.
 func parseSetValues(sets []string) map[string]interface{} {
 	out := make(map[string]interface{})
@@ -516,6 +560,7 @@ func init() {
 	addCmd.Flags().StringVar(&addVersion, "version", "", "Chart version constraint")
 	addCmd.Flags().StringVar(&addImage, "image", "", "Docker image")
 	addCmd.Flags().StringVar(&addCompFile, "compose-file", "", "Path to existing docker-compose.yaml")
+	addCmd.Flags().StringVar(&addK8sPath, "k8s-path", "", "Path to K8s manifest directory or file")
 	addCmd.Flags().StringArrayVar(&addSets, "set", nil, "Set Helm value (key=val, repeatable)")
 	addCmd.Flags().StringVar(&addValues, "values", "", "Load values from file and merge inline into composed.yaml")
 	addCmd.Flags().StringVar(&addValuesFile, "values-file", "", "Store values file reference (loaded at build time)")
