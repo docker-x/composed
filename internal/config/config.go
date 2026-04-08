@@ -25,6 +25,29 @@ import (
 // shellTimeout is the maximum time a shell command may run.
 const shellTimeout = 30 * time.Second
 
+// FlexStringSlice unmarshals both a scalar string ("foo.env") and a list
+// (["a.env", "b.env"]) into []string. This matches Docker Compose's env_file
+// and similar fields that accept either form.
+type FlexStringSlice []string
+
+// UnmarshalYAML implements yaml.Unmarshaler for FlexStringSlice.
+func (f *FlexStringSlice) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		*f = []string{value.Value}
+		return nil
+	case yaml.SequenceNode:
+		var items []string
+		if err := value.Decode(&items); err != nil {
+			return err
+		}
+		*f = items
+		return nil
+	default:
+		return fmt.Errorf("env_file: expected string or list, got %v", value.Kind)
+	}
+}
+
 // File is the top-level composed.yaml structure.
 // It is a valid Docker Compose file extended with x- fields.
 type File struct {
@@ -66,7 +89,7 @@ type Service struct {
 	Command     []string          `yaml:"command,omitempty"`
 	Entrypoint  []string          `yaml:"entrypoint,omitempty"`
 	Environment map[string]string `yaml:"environment,omitempty"`
-	EnvFile     []string          `yaml:"env_file,omitempty"`
+	EnvFile     FlexStringSlice   `yaml:"env_file,omitempty"`
 	Ports       []string          `yaml:"ports,omitempty"`
 	Volumes     []string          `yaml:"volumes,omitempty"`
 	Healthcheck *Healthcheck      `yaml:"healthcheck,omitempty"`
@@ -373,7 +396,7 @@ func runShellCommand(command string) (string, error) {
 func RunShellEntries(entries []NamedShellEntry) (map[string]string, error) {
 	values := make(map[string]string, len(entries))
 	for _, named := range entries {
-		fmt.Fprintf(os.Stderr, "Running x-shell %q: %s\n", named.Name, named.Entry.Command)
+		fmt.Fprintf(os.Stderr, "Running x-shell %q ...\n", named.Name)
 		out, err := runShellCommand(named.Entry.Command)
 		if err != nil {
 			if named.Entry.AllowFailure {

@@ -74,8 +74,13 @@ func emitVolumes(doc *yaml.Node, volumes map[string]*Volume) {
 			if v.Name != "" {
 				addScalar(inner, "name", v.Name)
 			}
-		} else if v.Driver != "" && v.Driver != "local" {
-			addScalar(inner, "driver", v.Driver)
+		} else {
+			if v.Driver != "" && v.Driver != "local" {
+				addScalar(inner, "driver", v.Driver)
+			}
+			if v.Name != "" {
+				addScalar(inner, "name", v.Name)
+			}
 		}
 		// Empty mapping = default volume
 		if len(inner.Content) == 0 {

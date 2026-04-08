@@ -312,3 +312,32 @@ func TestEmit_EmptyFile(t *testing.T) {
 		t.Error("empty file should not have services section")
 	}
 }
+
+func TestEmit_VolumeNameNonExternal(t *testing.T) {
+	f := NewFile()
+	f.Volumes["data"] = &Volume{Name: "shared-db"}
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+	if !strings.Contains(out, "name: shared-db") {
+		t.Error("non-external volume should emit name: when set")
+	}
+}
+
+func TestEmit_ServiceEnvFile(t *testing.T) {
+	f := NewFile()
+	svc := NewService(testImageApp)
+	svc.EnvFile = []string{"./app.env", "./extra.env"}
+	f.Services["app"] = svc
+	out, err := Emit(f)
+	if err != nil {
+		t.Fatalf(errFmtEmit, err)
+	}
+	if !strings.Contains(out, "env_file:") {
+		t.Error("should emit env_file section")
+	}
+	if !strings.Contains(out, "app.env") {
+		t.Error("should contain app.env in output")
+	}
+}

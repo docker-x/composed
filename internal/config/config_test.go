@@ -1005,3 +1005,37 @@ services:
 		t.Errorf("BAD = %q, want unresolved placeholder %q", app.Environment["BAD"], "${shell:false}")
 	}
 }
+
+func TestEnvFileScalarAndList(t *testing.T) {
+	// env_file as scalar string
+	f1, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+    env_file: .env
+`))
+	if err != nil {
+		t.Fatalf(errFmtParse, err)
+	}
+	if len(f1.Services["app"].EnvFile) != 1 || f1.Services["app"].EnvFile[0] != ".env" {
+		t.Errorf("scalar env_file = %v, want [.env]", f1.Services["app"].EnvFile)
+	}
+
+	// env_file as list
+	f2, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+    env_file:
+      - .env
+      - extra.env
+`))
+	if err != nil {
+		t.Fatalf(errFmtParse, err)
+	}
+	if len(f2.Services["app"].EnvFile) != 2 {
+		t.Errorf("list env_file length = %d, want 2", len(f2.Services["app"].EnvFile))
+	}
+}

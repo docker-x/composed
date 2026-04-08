@@ -127,6 +127,10 @@ services:
 
 Three syntax tiers: named shorthand (`x-shell: { name: "cmd" }`), named long form with options, and inline `${shell:cmd}` for one-off values.
 
+> **Security note:** `x-shell` executes arbitrary commands on the host during
+> `composed build` / `composed up`. Only run against trusted `composed.yaml`
+> files — an untrusted config is equivalent to arbitrary code execution.
+
 ### Flexible Helm values
 
 Three ways to configure charts, with clear merge priority:
