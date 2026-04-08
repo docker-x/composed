@@ -10,15 +10,20 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// shellTimeout is the maximum time a shell command may run.
+const shellTimeout = 30 * time.Second
 
 // File is the top-level composed.yaml structure.
 // It is a valid Docker Compose file extended with x- fields.
@@ -26,7 +31,14 @@ type File struct {
 	Name     string                  `yaml:"name"`
 	Services map[string]Service      `yaml:"services"`
 	Volumes  map[string]VolumeConfig `yaml:"volumes"`
-	XShell   map[string]ShellEntry   `yaml:"-"`
+	XShell   []NamedShellEntry       `yaml:"-"`
+}
+
+// NamedShellEntry pairs a shell entry name with its definition,
+// preserving the declaration order from YAML.
+type NamedShellEntry struct {
+	Name  string
+	Entry ShellEntry
 }
 
 // VolumeConfig represents a top-level volume declaration.
@@ -133,16 +145,17 @@ func Parse(data []byte) (*File, error) {
 		}
 	}
 	if f.XShell == nil {
-		f.XShell = make(map[string]ShellEntry)
+		f.XShell = []NamedShellEntry{}
 	}
 
 	return f, nil
 }
 
-// parseShellEntries parses the x-shell YAML node into a map of ShellEntry.
+// parseShellEntries parses the x-shell YAML node into an ordered slice of NamedShellEntry.
 // Each entry can be a string (shorthand) or a map (long form).
-func parseShellEntries(node *yaml.Node) (map[string]ShellEntry, error) {
-	entries := make(map[string]ShellEntry)
+// The slice preserves YAML declaration order.
+func parseShellEntries(node *yaml.Node) ([]NamedShellEntry, error) {
+	var entries []NamedShellEntry
 
 	// x-shell must be a mapping
 	if node.Kind != yaml.MappingNode {
@@ -157,14 +170,14 @@ func parseShellEntries(node *yaml.Node) (map[string]ShellEntry, error) {
 		switch valNode.Kind {
 		case yaml.ScalarNode:
 			// Shorthand: name: "command"
-			entries[name] = ShellEntry{Command: valNode.Value}
+			entries = append(entries, NamedShellEntry{Name: name, Entry: ShellEntry{Command: valNode.Value}})
 		case yaml.MappingNode:
 			// Long form: name: {command: "...", allow_failure: true}
 			var entry ShellEntry
 			if err := valNode.Decode(&entry); err != nil {
 				return nil, fmt.Errorf("parse shell entry %q: %w", name, err)
 			}
-			entries[name] = entry
+			entries = append(entries, NamedShellEntry{Name: name, Entry: entry})
 		default:
 			return nil, fmt.Errorf("shell entry %q: expected string or mapping", name)
 		}
@@ -185,8 +198,12 @@ func (f *File) ResolveRefs(shellValues map[string]string) error {
 			exports[name+"."+k] = v
 		}
 	}
-	// Add shell values as top-level names (no dot needed)
+	// Add shell values as top-level names (no dot needed).
+	// Warn if a shell name shadows an existing export key.
 	for name, val := range shellValues {
+		if prev, exists := exports[name]; exists {
+			fmt.Fprintf(os.Stderr, "Warning: x-shell %q shadows export %q (was %q)\n", name, name, prev)
+		}
 		exports[name] = val
 	}
 
@@ -242,6 +259,8 @@ func resolveString(s string, exports map[string]string, services map[string]Serv
 			cmd := strings.TrimSpace(ref[len(shellRefPrefix):])
 			if out, err := runShellCommand(cmd); err == nil {
 				return out
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: inline shell %q failed: %v\n", cmd, err)
 			}
 			// On failure, leave unresolved
 			return match
@@ -325,34 +344,36 @@ func resolveMap(m map[string]interface{}, exports map[string]string, services ma
 	return out
 }
 
-// runShellCommand executes a command via sh -c and returns trimmed stdout.
+// runShellCommand executes a command via sh -c with a timeout and returns trimmed stdout.
 func runShellCommand(command string) (string, error) {
 	shPath, err := exec.LookPath("sh")
 	if err != nil {
 		return "", fmt.Errorf("sh not found: %w", err)
 	}
-	out, err := exec.Command(shPath, "-c", command).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, shPath, "-c", command).Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-// RunShellEntries executes all top-level x-shell entries in order and
-// returns a map of name → trimmed stdout.
-func RunShellEntries(entries map[string]ShellEntry) (map[string]string, error) {
+// RunShellEntries executes all top-level x-shell entries in declaration order
+// and returns a map of name -> trimmed stdout.
+func RunShellEntries(entries []NamedShellEntry) (map[string]string, error) {
 	values := make(map[string]string, len(entries))
-	for name, entry := range entries {
-		fmt.Fprintf(os.Stderr, "Running x-shell %q: %s\n", name, entry.Command)
-		out, err := runShellCommand(entry.Command)
+	for _, named := range entries {
+		fmt.Fprintf(os.Stderr, "Running x-shell %q: %s\n", named.Name, named.Entry.Command)
+		out, err := runShellCommand(named.Entry.Command)
 		if err != nil {
-			if entry.AllowFailure {
-				fmt.Fprintf(os.Stderr, "Warning: x-shell %q failed: %v (allow_failure=true)\n", name, err)
+			if named.Entry.AllowFailure {
+				fmt.Fprintf(os.Stderr, "Warning: x-shell %q failed: %v (allow_failure=true)\n", named.Name, err)
 				continue
 			}
-			return nil, fmt.Errorf("x-shell %q failed: %w", name, err)
+			return nil, fmt.Errorf("x-shell %q failed: %w", named.Name, err)
 		}
-		values[name] = out
+		values[named.Name] = out
 	}
 	return values, nil
 }

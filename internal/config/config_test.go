@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+// findShellEntry looks up a named shell entry in an ordered slice.
+func findShellEntry(entries []NamedShellEntry, name string) (ShellEntry, bool) {
+	for _, e := range entries {
+		if e.Name == name {
+			return e.Entry, true
+		}
+	}
+	return ShellEntry{}, false
+}
+
 const (
 	testChartBitnamiRedis = "bitnami/redis"
 	testImagePostgres     = "postgres:15-alpine"
@@ -165,7 +175,7 @@ func checkEmptyConfig(t *testing.T, f *File) {
 
 func checkTopLevelShellShorthand(t *testing.T, f *File) {
 	t.Helper()
-	entry, ok := f.XShell["sso-token"]
+	entry, ok := findShellEntry(f.XShell, "sso-token")
 	if !ok {
 		t.Fatal("x-shell entry 'sso-token' not found")
 	}
@@ -179,7 +189,7 @@ func checkTopLevelShellShorthand(t *testing.T, f *File) {
 
 func checkTopLevelShellLongForm(t *testing.T, f *File) {
 	t.Helper()
-	entry, ok := f.XShell["sso-token"]
+	entry, ok := findShellEntry(f.XShell, "sso-token")
 	if !ok {
 		t.Fatal("x-shell entry 'sso-token' not found")
 	}
@@ -196,14 +206,14 @@ func checkTopLevelShellMixed(t *testing.T, f *File) {
 	if len(f.XShell) != 2 {
 		t.Fatalf("expected 2 x-shell entries, got %d", len(f.XShell))
 	}
-	short, ok := f.XShell["quick"]
+	short, ok := findShellEntry(f.XShell, "quick")
 	if !ok {
 		t.Fatal("x-shell entry 'quick' not found")
 	}
 	if short.Command != "echo fast" {
 		t.Errorf("quick.Command = %q", short.Command)
 	}
-	long, ok := f.XShell["careful"]
+	long, ok := findShellEntry(f.XShell, "careful")
 	if !ok {
 		t.Fatal("x-shell entry 'careful' not found")
 	}
@@ -774,8 +784,8 @@ func TestResolveMap(t *testing.T) {
 
 func TestRunShellEntries(t *testing.T) {
 	t.Run("captures stdout", func(t *testing.T) {
-		entries := map[string]ShellEntry{
-			"greeting": {Command: "echo hello-world"},
+		entries := []NamedShellEntry{
+			{Name: "greeting", Entry: ShellEntry{Command: "echo hello-world"}},
 		}
 		vals, err := RunShellEntries(entries)
 		if err != nil {
@@ -787,8 +797,8 @@ func TestRunShellEntries(t *testing.T) {
 	})
 
 	t.Run("failure aborts", func(t *testing.T) {
-		entries := map[string]ShellEntry{
-			"fail": {Command: "false"},
+		entries := []NamedShellEntry{
+			{Name: "fail", Entry: ShellEntry{Command: "false"}},
 		}
 		_, err := RunShellEntries(entries)
 		if err == nil {
@@ -797,8 +807,8 @@ func TestRunShellEntries(t *testing.T) {
 	})
 
 	t.Run("allow_failure continues", func(t *testing.T) {
-		entries := map[string]ShellEntry{
-			"fail": {Command: "false", AllowFailure: true},
+		entries := []NamedShellEntry{
+			{Name: "fail", Entry: ShellEntry{Command: "false", AllowFailure: true}},
 		}
 		vals, err := RunShellEntries(entries)
 		if err != nil {
@@ -806,6 +816,22 @@ func TestRunShellEntries(t *testing.T) {
 		}
 		if _, ok := vals["fail"]; ok {
 			t.Error("failed entry should not have a value")
+		}
+	})
+
+	t.Run("preserves declaration order", func(t *testing.T) {
+		// Entries should execute in the order declared, not random map order
+		entries := []NamedShellEntry{
+			{Name: "first", Entry: ShellEntry{Command: "echo 1"}},
+			{Name: "second", Entry: ShellEntry{Command: "echo 2"}},
+			{Name: "third", Entry: ShellEntry{Command: "echo 3"}},
+		}
+		vals, err := RunShellEntries(entries)
+		if err != nil {
+			t.Fatalf("RunShellEntries error: %v", err)
+		}
+		if vals["first"] != "1" || vals["second"] != "2" || vals["third"] != "3" {
+			t.Errorf("unexpected values: %v", vals)
 		}
 	})
 }
@@ -950,5 +976,29 @@ services:
 	app := f.Services["app"]
 	if app.Environment["GREETING"] != "inline-hello" {
 		t.Errorf("GREETING = %q, want %q", app.Environment["GREETING"], "inline-hello")
+	}
+}
+
+func TestInlineShellRefFailure(t *testing.T) {
+	f, err := Parse([]byte(`
+name: test
+services:
+  app:
+    image: myapp
+    environment:
+      BAD: "${shell:false}"
+`))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if err := f.ResolveRefs(nil); err != nil {
+		t.Fatalf("ResolveRefs error: %v", err)
+	}
+
+	app := f.Services["app"]
+	// Failing inline shell should leave the placeholder unresolved
+	if app.Environment["BAD"] != "${shell:false}" {
+		t.Errorf("BAD = %q, want unresolved placeholder %q", app.Environment["BAD"], "${shell:false}")
 	}
 }

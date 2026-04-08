@@ -235,6 +235,7 @@ func overlayServiceFields(frag *compose.File, name string, svc *config.Service) 
 	if !ok {
 		// Helm charts may not produce a service with the exact name;
 		// if there's only one service, use it.
+		// target is a *Service pointer, so mutations are reflected in frag.Services.
 		if len(frag.Services) == 1 {
 			for _, s := range frag.Services {
 				target = s
@@ -310,12 +311,14 @@ func preloadComposeExports(cfg *config.File) {
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot read component %s for %q: %v\n", path, name, err)
 			continue
 		}
 		var raw struct {
 			Services map[string]rawServiceStruct `yaml:"services"`
 		}
 		if err := yamlUnmarshal(data, &raw); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot parse component %s for %q: %v\n", path, name, err)
 			continue
 		}
 		// Find the service (match by name, or use the only one)
@@ -401,6 +404,7 @@ func imageToCompose(name string, svc *config.Service) *compose.File {
 	cs.Entrypoint = svc.Entrypoint
 	cs.Ports = svc.Ports
 	cs.Volumes = svc.Volumes
+	cs.EnvFile = svc.EnvFile
 	for k, v := range svc.Environment {
 		cs.Environment[k] = v
 	}
@@ -754,10 +758,13 @@ func parseEnvFileList(raw interface{}) []string {
 }
 
 // loadEnvFile reads a .env file and returns KEY=VALUE pairs.
-// Skips blank lines, comments (#), and supports quoting.
+// Skips blank lines, comments (#), and supports matched quoting.
 func loadEnvFile(path string) map[string]string {
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: env_file %q not found, skipping\n", path)
+		}
 		return nil
 	}
 	defer f.Close()
@@ -769,11 +776,17 @@ func loadEnvFile(path string) map[string]string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		// Support `export KEY=VAL` syntax
+		line = strings.TrimPrefix(line, "export ")
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
-		v = strings.Trim(v, `"'`)
+		// Strip matched quote pairs only
+		if (strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`)) ||
+			(strings.HasPrefix(v, `'`) && strings.HasSuffix(v, `'`)) {
+			v = v[1 : len(v)-1]
+		}
 		result[k] = v
 	}
 	return result

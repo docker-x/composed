@@ -107,8 +107,8 @@ composed down
 ## composed.yaml Format
 
 `composed.yaml` is a Docker Compose file with `x-` extensions. Plain services
-work with `docker compose up` directly. Services with `x-helm`, `x-compose-file`,
-or `x-shell` need `composed build` first.
+work with `docker compose up` directly. Files with `x-helm`, `x-compose-file`,
+or `x-shell` entries need `composed build` first.
 
 ```yaml
 name: my-stack

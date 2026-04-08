@@ -739,6 +739,8 @@ FOO=bar
 QUOTED="hello world"
 SINGLE='val'
 EMPTY=
+export EXPORTED=yes
+MISMATCHED='hello"
 
 # another comment
 DB_HOST=localhost
@@ -750,11 +752,13 @@ DB_HOST=localhost
 	got := loadEnvFile(envPath)
 
 	want := map[string]string{
-		"FOO":     "bar",
-		"QUOTED":  "hello world",
-		"SINGLE":  "val",
-		"EMPTY":   "",
-		"DB_HOST": "localhost",
+		"FOO":        "bar",
+		"QUOTED":     "hello world",
+		"SINGLE":     "val",
+		"EMPTY":      "",
+		"EXPORTED":   "yes",
+		"MISMATCHED": `'hello"`, // mismatched quotes are NOT stripped
+		"DB_HOST":    "localhost",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -874,5 +878,31 @@ services:
 	}
 	if svc.XExports["port"] != "5432" {
 		t.Errorf("XExports[port] = %q, want 5432", svc.XExports["port"])
+	}
+}
+
+func TestImageToCompose_EnvFile(t *testing.T) {
+	svc := &config.Service{
+		Image:   "postgres:15",
+		EnvFile: []string{"./postgres.env", "./extra.env"},
+		Environment: map[string]string{
+			"FOO": "bar",
+		},
+	}
+
+	frag := imageToCompose("postgres", svc)
+
+	cs, ok := frag.Services["postgres"]
+	if !ok {
+		t.Fatal("service 'postgres' not found in fragment")
+	}
+	if len(cs.EnvFile) != 2 {
+		t.Fatalf("EnvFile length = %d, want 2", len(cs.EnvFile))
+	}
+	if cs.EnvFile[0] != "./postgres.env" || cs.EnvFile[1] != "./extra.env" {
+		t.Errorf("EnvFile = %v, want [./postgres.env ./extra.env]", cs.EnvFile)
+	}
+	if cs.Environment["FOO"] != "bar" {
+		t.Errorf("Environment[FOO] = %q, want bar", cs.Environment["FOO"])
 	}
 }
