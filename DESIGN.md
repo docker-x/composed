@@ -81,6 +81,7 @@ Merge priority (low → high): `values_file` → inline `values:` → `--set`
 | `--values-file <path>` | Store file reference for build-time loading |
 | `--repo <url>` | Helm chart repository URL |
 | `--version <constraint>` | Chart version constraint |
+| `--k8s-path <path>` | Path to K8s manifest directory or file |
 | `--port <host:container>` | Port mapping (image type, repeatable) |
 | `--env <KEY=VAL>` | Environment variable (image type, repeatable) |
 | `--volume <name:/path>` | Volume mount (image type, repeatable) |

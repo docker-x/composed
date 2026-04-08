@@ -11,7 +11,7 @@ The `composed.yaml` file is the single source of truth for your project. It decl
 `composed.yaml` is a **valid Docker Compose file** extended with `x-` prefixed fields. The Docker Compose specification treats any top-level or service-level key starting with `x-` as an extension and ignores it. This means:
 
 - Services that only use standard fields (image, ports, environment, etc.) work with `docker compose up` directly -- no build step needed.
-- Services that use `x-helm` or `x-compose-file` need `composed build` to produce the final `docker-compose.yaml`.
+- Services that use `x-helm`, `x-k8s`, or `x-compose-file` need `composed build` to produce the final `docker-compose.yaml`.
 
 You can always run `docker compose config -f composed.yaml` to validate the file syntax, even if it contains extensions.
 
@@ -22,10 +22,11 @@ Composed infers the service type from which extensions are present:
 | Has | Type | Behavior |
 |-----|------|----------|
 | `x-helm` | helm | Chart rendered via `helm template`, Kubernetes manifests translated to compose services |
+| `x-k8s` | k8s | K8s YAML manifests read from a directory/file and translated to compose services |
 | `x-compose-file` | compose | External compose file parsed and merged into the output |
 | (neither) | image | Standard compose service, passed through as-is |
 
-A service can only be one type. If both `x-helm` and `x-compose-file` are set, `x-helm` takes precedence.
+A service can only be one type. If both `x-helm` and `x-k8s` are set, `x-helm` takes precedence.
 
 ## Config file resolution
 
@@ -41,7 +42,7 @@ composed build -f path/to/my-config.yaml
 
 ## Full example
 
-Below is a complete `composed.yaml` that uses all three service types:
+Below is a complete `composed.yaml` that uses all service types:
 
 ```yaml
 name: my-stack
@@ -60,6 +61,12 @@ services:
     x-exports:
       host: redis-master
       port: "6379"
+
+  # --- K8s manifests service ---
+  my-app:
+    x-k8s:
+      command: "cdk8s synth"
+      path: ./my-cdk8s-app/dist
 
   # --- External compose file ---
   monitoring:
@@ -106,7 +113,8 @@ volumes:
 Running `composed build` on this file will:
 
 1. Render the `bitnami/redis` Helm chart and translate the Kubernetes manifests into compose services.
-2. Parse `./monitoring/docker-compose.yaml` and merge its services, volumes, and networks into the output.
-3. Pass the `postgres` and `app` services through as-is.
-4. Resolve `${postgres.host}`, `${postgres.password}`, `${redis.host}`, etc. using each service's `x-exports`.
-5. Write the merged result to `docker-compose.yaml`.
+2. Run `cdk8s synth` and translate the K8s manifests from `./my-cdk8s-app/dist` into compose services.
+3. Parse `./monitoring/docker-compose.yaml` and merge its services, volumes, and networks into the output.
+4. Pass the `postgres` and `app` services through as-is.
+5. Resolve `${postgres.host}`, `${postgres.password}`, `${redis.host}`, etc. using each service's `x-exports`.
+6. Write the merged result to `docker-compose.yaml`.

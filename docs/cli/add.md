@@ -15,6 +15,7 @@ Adds a service to `composed.yaml`. Source type is auto-detected:
 | `oci://...` | Probes OCI manifest -- helm chart or container image |
 | `*.yaml` / `*.yml` | Compose file include |
 | Directory with `Chart.yaml` | Local helm chart |
+| Directory with K8s YAML files | K8s manifests (cdk8s, kustomize, etc.) |
 | `repo/chart` (with `--repo`) | Helm chart repository |
 | Everything else | Docker image |
 
@@ -29,6 +30,7 @@ Service name is derived from the source if not given (last path segment, tag str
 | `--values-file path` | Store file reference for build-time loading |
 | `--repo url` | Helm chart repository URL |
 | `--version constraint` | Chart version constraint |
+| `--k8s-path path` | Path to K8s manifest directory or file |
 | `--port host:container` | Port mapping (image type, repeatable) |
 | `--env KEY=VAL` | Environment variable (image type, repeatable) |
 | `--volume name:/path` | Volume mount (image type, repeatable) |
@@ -48,4 +50,10 @@ composed add litellm oci://docker.litellm.ai/berriai/litellm-helm --set image.ta
 
 # With dependency
 composed add myapp:latest --depends-on postgres --depends-on redis
+
+# K8s manifest directory (auto-detected)
+composed add ./k8s/manifests
+
+# K8s with explicit flag
+composed add my-app --k8s-path ./k8s/manifests
 ```

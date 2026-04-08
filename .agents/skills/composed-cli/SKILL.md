@@ -59,6 +59,7 @@ Source type is auto-detected by probing OCI registry manifests or inspecting the
 - `oci://...` → probes registry manifest (helm chart or container image)
 - `*.yaml` / `*.yml` → compose file include
 - Directory with `Chart.yaml` → local helm chart
+- Directory with K8s YAML files (containing `kind:` and `apiVersion:`) → K8s manifests
 - Everything else → Docker image
 
 Name is derived from the source if not given.
@@ -82,6 +83,12 @@ composed add oci://... --values-file ./values.yaml      # reference, loaded at b
 
 # With dependencies
 composed add myapp:latest --depends-on postgres --depends-on redis
+
+# K8s manifests directory (auto-detected)
+composed add ./k8s/manifests
+
+# K8s with explicit flag
+composed add my-app --k8s-path ./k8s/manifests
 ```
 
 ### `build` — Build docker-compose.yaml
@@ -107,7 +114,7 @@ composed down
 ## composed.yaml Format
 
 `composed.yaml` is a Docker Compose file with `x-` extensions. Plain services
-work with `docker compose up` directly. Files with `x-helm`, `x-compose-file`,
+work with `docker compose up` directly. Files with `x-helm`, `x-k8s`, `x-compose-file`,
 or `x-shell` entries need `composed build` first.
 
 ```yaml
@@ -139,6 +146,12 @@ services:
   # Include external compose file
   monitoring:
     x-compose-file: ./monitoring/docker-compose.yaml
+
+  # K8s manifests — cdk8s, kustomize, hand-written YAML, etc.
+  my-app:
+    x-k8s:
+      command: "cdk8s synth"         # optional pre-build command
+      path: ./my-cdk8s-app/dist      # directory or single YAML file
 
   # Cross-service references via x-exports
   app:
@@ -294,6 +307,29 @@ composed up
 ```
 
 No network after initial pull. Edit values or even chart templates, then `composed up`.
+
+### K8s manifests (cdk8s, kustomize, etc.)
+
+```bash
+composed init
+cdk8s init                           # or write K8s YAML by hand
+cdk8s synth                          # generates dist/
+composed add ./dist                  # auto-detected as K8s manifests
+composed up
+```
+
+Or with the command integrated:
+
+```bash
+composed init
+# Manually add x-k8s with command to composed.yaml:
+# services:
+#   my-app:
+#     x-k8s:
+#       command: "cdk8s synth"
+#       path: ./dist
+composed up                          # runs cdk8s synth, then translates
+```
 
 ### What to track in git
 

@@ -99,11 +99,12 @@ Composed reads `env_file` and component `environment:` blocks at build time so c
 
 ### Mix anything
 
-Combine three source types in one file:
+Combine source types in one file:
 
 | Source | Extension | Example |
 |--------|-----------|---------|
 | Helm chart | `x-helm` | `chart: oci://ghcr.io/org/chart` |
+| K8s manifests | `x-k8s` | `path: ./k8s/manifests` |
 | Compose file | `x-compose-file` | `file: ./other/docker-compose.yaml` |
 | Shell command | `x-shell` | `command: "vault kv get ..."` |
 | Docker image | *(none)* | `image: postgres:16` |
@@ -157,6 +158,7 @@ Run `composed init --helm-values` to scaffold default value files for every char
 composed add oci://ghcr.io/org/chart    # OCI Helm chart
 composed add docker.io/library/redis:7   # Docker image
 composed add ./local-chart/              # local chart directory
+composed add ./k8s/manifests/            # K8s manifest directory (cdk8s, kustomize, etc.)
 composed add bitnami/nginx               # repo/chart reference
 ```
 
@@ -181,7 +183,7 @@ composed up                                # docker compose up
 - [Installation](getting-started/installation.md) -- Install options: Homebrew, binary, Go.
 - [Quick Start](getting-started/quick-start.md) -- Full walkthrough with a real Helm chart.
 - [Config File](guide/config-file.md) -- Format, service types, build pipeline.
-- [Extensions](guide/extensions.md) -- `x-helm`, `x-compose-file`, `x-shell`, `x-exports`, and direct references.
+- [Extensions](guide/extensions.md) -- `x-helm`, `x-k8s`, `x-compose-file`, `x-shell`, `x-exports`, and direct references.
 - [Translation Rules](guide/translation-rules.md) -- How K8s resources map to Compose.
 - [CLI Reference](cli/init.md) -- Every command and flag.
 

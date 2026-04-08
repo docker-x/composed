@@ -8,7 +8,7 @@ sidebar_position: 3
 composed build [-f composed.yaml] [-o docker-compose.yaml]
 ```
 
-Runs the full pipeline: resolves `x-exports`, renders `x-helm` charts (`helm template`), translates K8s manifests to Compose, merges `x-compose-file` includes, and outputs a clean `docker-compose.yaml`.
+Runs the full pipeline: resolves `x-exports`, renders `x-helm` charts (`helm template`), reads `x-k8s` manifests, translates K8s manifests to Compose, merges `x-compose-file` includes, and outputs a clean `docker-compose.yaml`.
 
 ## Flags
 

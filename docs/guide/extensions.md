@@ -38,6 +38,48 @@ When both `values` and `values_file` are set, the values file is loaded first an
 
 ---
 
+## x-k8s
+
+Declares that a service is backed by Kubernetes YAML manifests. At build time, Composed reads the manifests from a directory or file and translates them into Docker Compose services using the same K8s-to-Compose pipeline that `x-helm` uses internally.
+
+This supports any tool that produces standard K8s manifests: **cdk8s**, **kustomize**, **Timoni**, **Tanka**, or hand-written YAML.
+
+```yaml
+services:
+  my-app:
+    x-k8s:
+      path: ./k8s/manifests          # directory of *.yaml files or a single file
+```
+
+With an optional pre-build command (e.g. cdk8s, kustomize):
+
+```yaml
+services:
+  my-app:
+    x-k8s:
+      command: "cdk8s synth"          # run before reading manifests
+      path: ./my-cdk8s-app/dist      # where to find K8s YAML after command runs
+```
+
+### Fields
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `path` | yes | -- | Directory of K8s YAML files (globbed as `*.yaml` + `*.yml`) or a single YAML file. Resolved relative to `composed.yaml`. |
+| `command` | no | -- | Shell command to run before reading manifests (e.g. `cdk8s synth`, `kustomize build -o dir/`). Runs with a 60-second timeout. |
+
+### Execution rules
+
+- If `command` is set, it runs before reading `path`.
+- If `path` is a directory, all `*.yaml` and `*.yml` files in it are concatenated (non-recursive -- only top-level files).
+- The concatenated YAML is fed through the same `k8s.Parse` -> `translate.Translate` pipeline used by `x-helm`.
+
+### Relationship to x-helm
+
+`x-helm` is effectively sugar for "run `helm template`, then do the standard K8s-to-Compose translation." `x-k8s` exposes the second half directly, accepting manifests from any source.
+
+---
+
 ## x-compose-file
 
 Declares that a service is backed by an external Docker Compose file. At build time, Composed parses the referenced file and merges its services, volumes, networks, and configs into the output.

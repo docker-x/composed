@@ -29,16 +29,24 @@ composed.yaml
 |     +-- Translate (internal/translate)              |
 |         +-- K8s objects -> Compose model            |
 |                                                    |
-|  3. For each x-compose-file service:               |
+|  3. For each x-k8s service:                        |
+|     +-- Run optional pre-build command             |
+|     +-- Read K8s manifests from path               |
+|     +-- Parse K8s manifests (internal/k8s)         |
+|     |   +-- Multi-doc split -> typed objects        |
+|     +-- Translate (internal/translate)              |
+|         +-- K8s objects -> Compose model            |
+|                                                    |
+|  4. For each x-compose-file service:               |
 |     +-- Parse external compose file                |
 |                                                    |
-|  4. For each plain image service:                  |
+|  5. For each plain image service:                  |
 |     +-- Pass through as-is                         |
 |                                                    |
-|  5. Merge all fragments (internal/merge)           |
+|  6. Merge all fragments (internal/merge)           |
 |     +-- Union services, volumes, networks, configs |
 |                                                    |
-|  6. Emit YAML (internal/compose)                   |
+|  7. Emit YAML (internal/compose)                   |
 |     +-- Compose model -> deterministic YAML        |
 |                                                    |
 +---------------------------------------------------+
@@ -55,17 +63,22 @@ service definition.
 triggers a chart pull, a `helm template` render, Kubernetes manifest parsing, and
 finally translation into the Compose model.
 
-**Stage 3** handles services that reference an external `docker-compose.yaml`
+**Stage 3** handles generic K8s manifest services. Each service with an `x-k8s`
+extension optionally runs a pre-build command (e.g. `cdk8s synth`), reads YAML
+files from the specified path, parses them, and translates them into the Compose
+model using the same pipeline as `x-helm`.
+
+**Stage 4** handles services that reference an external `docker-compose.yaml`
 fragment via `x-compose-file`. These are parsed directly into the Compose model.
 
-**Stage 4** handles plain image services (no Helm chart, no external file). These
-pass through to the output unchanged.
+**Stage 5** handles plain image services (no Helm chart, no K8s manifests, no
+external file). These pass through to the output unchanged.
 
-**Stage 5** merges every Compose fragment produced by the previous stages into a
+**Stage 6** merges every Compose fragment produced by the previous stages into a
 single unified model. Services, volumes, networks, and configs are unioned
 together.
 
-**Stage 6** serializes the merged Compose model into deterministic YAML. Map keys
+**Stage 7** serializes the merged Compose model into deterministic YAML. Map keys
 are sorted before emission to guarantee reproducible output.
 
 ## Package Layout
