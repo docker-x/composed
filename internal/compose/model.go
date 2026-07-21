@@ -13,11 +13,16 @@ type File struct {
 	Volumes  map[string]*Volume
 	Networks map[string]*Network
 	Configs  map[string]*Config
+	Secrets  map[string]*Secret
 }
 
 // Service represents a single compose service.
 type Service struct {
 	Image       string
+	Build       *Build
+	WorkingDir  string
+	User        string
+	NetworkMode string
 	Entrypoint  []string
 	Command     []string
 	Environment map[string]string
@@ -29,10 +34,18 @@ type Service struct {
 	Healthcheck *Healthcheck
 	Deploy      *Deploy
 	Configs     []ServiceConfig
+	Secrets     []string
 	Labels      map[string]string
 	Restart     string // "unless-stopped", "no", "on-failure", etc.
 	Profiles    []string
 	ShmSize     string // e.g. "64m"
+}
+
+type Build struct {
+	Context    string
+	Dockerfile string
+	Args       map[string]string
+	Secrets    []string
 }
 
 type DependsOnCondition struct {
@@ -83,9 +96,20 @@ type Config struct {
 	File    string // or path to file
 }
 
+type Secret struct {
+	File     string
+	External bool
+	Name     string // actual Docker secret name when different from key and external
+}
+
 type ServiceConfig struct {
 	Source string
 	Target string
+}
+
+// NewSecret returns a secret placeholder pointing at a file.
+func NewSecret(file string) *Secret {
+	return &Secret{File: file}
 }
 
 // NewFile returns an empty Compose file with initialized maps.
@@ -95,6 +119,7 @@ func NewFile() *File {
 		Volumes:  make(map[string]*Volume),
 		Networks: make(map[string]*Network),
 		Configs:  make(map[string]*Config),
+		Secrets:  make(map[string]*Secret),
 	}
 }
 
