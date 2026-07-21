@@ -29,6 +29,7 @@ func mergeFragment(out, f *compose.File) {
 	mergeFragmentVolumes(out, f)
 	mergeFragmentNetworks(out, f)
 	mergeFragmentConfigs(out, f)
+	mergeFragmentSecrets(out, f)
 }
 
 func mergeHeader(out, f *compose.File) {
@@ -79,6 +80,15 @@ func mergeFragmentConfigs(out, f *compose.File) {
 	}
 }
 
+func mergeFragmentSecrets(out, f *compose.File) {
+	// Union merge top-level secrets from fragments
+	for name, sec := range f.Secrets {
+		if _, ok := out.Secrets[name]; !ok {
+			out.Secrets[name] = sec
+		}
+	}
+}
+
 // mergeService merges src into dst. src values override dst for scalars;
 // maps and slices are union-merged.
 func mergeService(dst, src *compose.Service) {
@@ -91,11 +101,23 @@ func mergeService(dst, src *compose.Service) {
 	if len(src.Command) > 0 {
 		dst.Command = src.Command
 	}
+	if src.WorkingDir != "" {
+		dst.WorkingDir = src.WorkingDir
+	}
+	if src.User != "" {
+		dst.User = src.User
+	}
+	if src.NetworkMode != "" {
+		dst.NetworkMode = src.NetworkMode
+	}
 	if src.Restart != "" {
 		dst.Restart = src.Restart
 	}
 	if src.Healthcheck != nil {
 		dst.Healthcheck = src.Healthcheck
+	}
+	if src.Build != nil {
+		dst.Build = src.Build
 	}
 	if src.Deploy != nil {
 		dst.Deploy = src.Deploy
@@ -130,6 +152,9 @@ func mergeService(dst, src *compose.Service) {
 
 	// Append unique volumes
 	dst.Volumes = appendUnique(dst.Volumes, src.Volumes...)
+
+	// Append unique secrets
+	dst.Secrets = appendUnique(dst.Secrets, src.Secrets...)
 
 	// Append profiles
 	dst.Profiles = appendUnique(dst.Profiles, src.Profiles...)

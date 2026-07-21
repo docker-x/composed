@@ -496,6 +496,29 @@ K8s Deployment "redis-master"                Compose service "redis-master"
 
 Multi-container pods: each sidecar becomes `<deployment>-<container-name>`.
 
+### Pod `composed.docker-x/*` Annotations
+
+For single-container pods (or the primary container of a multi-container pod),
+K8s annotations on the pod template can override or extend the generated Compose
+service. These annotations are intentionally **ignored for sidecar containers**;
+they apply to the primary service only.
+
+| Annotation | Compose Mapping |
+|------------|-----------------|
+| `composed.docker-x/image` | Override `service.image` (empty value clears it) |
+| `composed.docker-x/build` | Replace `service.build` with the JSON-decoded `compose.Build` object |
+| `composed.docker-x/working-dir` | `service.working_dir` |
+| `composed.docker-x/user` | `service.user` |
+| `composed.docker-x/network-mode` | `service.network_mode` |
+| `composed.docker-x/restart` | `service.restart` |
+| `composed.docker-x/entrypoint` | JSON array → `service.entrypoint` |
+| `composed.docker-x/healthcheck` | JSON object → `service.healthcheck` |
+| `composed.docker-x/profiles` | Comma-separated list → `service.profiles` |
+| `composed.docker-x/depends-on` | Comma-separated list of `name` or `name:condition` → `service.depends_on`; default condition is `service_started` |
+| `composed.docker-x/secrets` | Comma-separated list → `service.secrets` |
+| `composed.docker-x/volumes` | Comma-separated short volume strings → appended to `service.volumes` |
+| `composed.docker-x/ports` | Comma-separated port strings, or JSON array → replaces any ports derived from a K8s Service; empty value is ignored. Malformed JSON is ignored with a warning. |
+
 ### K8s Service → Port Mappings
 
 The translator matches a K8s Service's `.spec.selector` to a Deployment's
@@ -524,6 +547,13 @@ the ports go on the StatefulSet's compose service.
 Same as ConfigMap, but `.data` values are base64-decoded. A warning is emitted
 that secrets will appear as plaintext in the compose file.
 
+### Top-level Secrets
+
+When a service (or a `service.build` definition) references a secret by name, a
+top-level `secrets:` entry is emitted. If the secret is not declared in any
+merged fragment, a placeholder with `file: /dev/null` is emitted and a warning
+is printed so users know the compose file is not ready for production use.
+
 ### PersistentVolumeClaim → Named Volume
 
 ```
@@ -534,7 +564,19 @@ K8s PVC "redis-data"          Compose volume "redis-data"
 
 Volume mounts cross-reference: if a container's `volumeMount` references a
 volume with `persistentVolumeClaim.claimName`, the compose service gets
-`redis-data:/data/mountPath`.
+`redis-data:/data/mountPath`. If `volumeMount.subPath` is set, it is appended as
+an additional path segment.
+
+### HostPath Volume → Bind Mount
+
+A `hostPath` volume becomes a host bind mount. `volumeMount.subPath` is appended
+to the host source path, and `readOnly` is translated to the `:ro` short-syntax
+suffix.
+
+```text
+hostPath.path = /data, mountPath = /data, subPath = db, readOnly = true
+→ /data/db:/data:ro
+```
 
 ### Init Containers → depends_on Chain
 
