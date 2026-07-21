@@ -1047,7 +1047,7 @@ func hasWindowsDrivePrefix(s string) bool {
 		return false
 	}
 	c := s[0]
-	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
 		return false
 	}
 	return s[2] == '\\' || s[2] == '/'
