@@ -96,11 +96,20 @@ type Config struct {
 	File    string // or path to file
 }
 
-type Secret struct{ File string }
+type Secret struct {
+	File     string
+	External bool
+	Name     string // actual Docker secret name when different from key and external
+}
 
 type ServiceConfig struct {
 	Source string
 	Target string
+}
+
+// NewSecret returns a secret placeholder pointing at a file.
+func NewSecret(file string) *Secret {
+	return &Secret{File: file}
 }
 
 // NewFile returns an empty Compose file with initialized maps.
