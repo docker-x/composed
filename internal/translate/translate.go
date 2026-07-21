@@ -73,13 +73,13 @@ func Translate(m *k8s.Manifests, opts Opts) (*Result, error) {
 	}
 
 	ctx := &translateCtx{
-		m:        m,
-		skip:     skipSet,
-		cf:       compose.NewFile(),
-		report:   &Report{},
-		cmIndex:  make(map[string]*corev1.ConfigMap),
-		secIndex: make(map[string]*corev1.Secret),
-		pvcIndex: make(map[string]*corev1.PersistentVolumeClaim),
+		m:                  m,
+		skip:               skipSet,
+		cf:                 compose.NewFile(),
+		report:             &Report{},
+		cmIndex:            make(map[string]*corev1.ConfigMap),
+		secIndex:           make(map[string]*corev1.Secret),
+		pvcIndex:           make(map[string]*corev1.PersistentVolumeClaim),
 		composeAnnotations: make(map[string]map[string]string),
 	}
 
@@ -114,13 +114,13 @@ func Translate(m *k8s.Manifests, opts Opts) (*Result, error) {
 // --- Internal translation context ---
 
 type translateCtx struct {
-	m        *k8s.Manifests
-	skip     map[string]bool
-	cf       *compose.File
-	report   *Report
-	cmIndex  map[string]*corev1.ConfigMap
-	secIndex map[string]*corev1.Secret
-	pvcIndex map[string]*corev1.PersistentVolumeClaim
+	m                  *k8s.Manifests
+	skip               map[string]bool
+	cf                 *compose.File
+	report             *Report
+	cmIndex            map[string]*corev1.ConfigMap
+	secIndex           map[string]*corev1.Secret
+	pvcIndex           map[string]*corev1.PersistentVolumeClaim
 	composeAnnotations map[string]map[string]string
 	// serviceLabelMap maps "label-key=label-val" sets to compose service names
 	// for matching K8s Services to compose services
@@ -243,7 +243,12 @@ func (c *translateCtx) translatePodSpec(
 		}
 
 		svc := c.translateContainerToService(container, podSpec)
-		applyComposeAnnotations(svc, podAnnotations)
+		// Pod-level compose annotations apply to the primary container only;
+		// applying image/ports/etc. to every sidecar is surprising and usually
+		// not what the author intended.
+		if i == 0 {
+			applyComposeAnnotations(svc, podAnnotations, c.report)
+		}
 
 		// Replicas
 		if replicas != nil && *replicas != 1 {
@@ -265,7 +270,7 @@ func (c *translateCtx) translatePodSpec(
 	}
 }
 
-func applyComposeAnnotations(svc *compose.Service, annotations map[string]string) {
+func applyComposeAnnotations(svc *compose.Service, annotations map[string]string, report *Report) {
 	if annotations == nil {
 		return
 	}
@@ -280,18 +285,24 @@ func applyComposeAnnotations(svc *compose.Service, annotations map[string]string
 		var entrypoint []string
 		if err := json.Unmarshal([]byte(encoded), &entrypoint); err == nil {
 			svc.Entrypoint = entrypoint
+		} else {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("invalid JSON in composed.docker-x/entrypoint annotation: %v", err))
 		}
 	}
 	if encoded := annotations["composed.docker-x/healthcheck"]; encoded != "" {
 		var healthcheck compose.Healthcheck
 		if err := json.Unmarshal([]byte(encoded), &healthcheck); err == nil {
 			svc.Healthcheck = &healthcheck
+		} else {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("invalid JSON in composed.docker-x/healthcheck annotation: %v", err))
 		}
 	}
 	if encoded := annotations["composed.docker-x/build"]; encoded != "" {
 		var build compose.Build
 		if err := json.Unmarshal([]byte(encoded), &build); err == nil {
 			svc.Build = &build
+		} else {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("invalid JSON in composed.docker-x/build annotation: %v", err))
 		}
 	}
 	if profiles := annotations["composed.docker-x/profiles"]; profiles != "" {
@@ -308,6 +319,9 @@ func applyComposeAnnotations(svc *compose.Service, annotations map[string]string
 				name, condition = strings.TrimSpace(dependency), "service_started"
 			}
 			if name != "" {
+				if condition == "" {
+					condition = "service_started"
+				}
 				svc.DependsOn[name] = compose.DependsOnCondition{Condition: condition}
 			}
 		}
@@ -326,33 +340,42 @@ func applyComposeAnnotations(svc *compose.Service, annotations map[string]string
 			}
 		}
 	}
-	applyComposePorts(svc, annotations)
+	applyComposePorts(svc, annotations, report)
 }
 
-func applyComposePorts(svc *compose.Service, annotations map[string]string) {
+func applyComposePorts(svc *compose.Service, annotations map[string]string, report *Report) {
 	ports, ok := annotations["composed.docker-x/ports"]
 	if !ok {
 		return
 	}
+	ports = strings.TrimSpace(ports)
+	if ports == "" {
+		return
+	}
 	// Explicit Compose ports are authoritative: a Kubernetes Service only
 	// supplies a useful default, while Compose may need host bindings.
-	svc.Ports = nil
-	var explicitPorts []string
-	if strings.HasPrefix(strings.TrimSpace(ports), "[") {
-		if err := json.Unmarshal([]byte(ports), &explicitPorts); err == nil {
-			for _, port := range explicitPorts {
-				if port = strings.TrimSpace(port); port != "" && !containsStr(svc.Ports, port) {
-					svc.Ports = append(svc.Ports, port)
-				}
-			}
+	// Parse into a local slice first so malformed values do not wipe existing
+	// service-derived ports.
+	var newPorts []string
+	if strings.HasPrefix(ports, "[") {
+		var explicitPorts []string
+		if err := json.Unmarshal([]byte(ports), &explicitPorts); err != nil {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("invalid JSON in composed.docker-x/ports annotation: %v", err))
 			return
 		}
-	}
-	for _, port := range strings.Split(ports, ",") {
-		if port = strings.TrimSpace(port); port != "" && !containsStr(svc.Ports, port) {
-			svc.Ports = append(svc.Ports, port)
+		for _, port := range explicitPorts {
+			if port = strings.TrimSpace(port); port != "" && !containsStr(newPorts, port) {
+				newPorts = append(newPorts, port)
+			}
+		}
+	} else {
+		for _, port := range strings.Split(ports, ",") {
+			if port = strings.TrimSpace(port); port != "" && !containsStr(newPorts, port) {
+				newPorts = append(newPorts, port)
+			}
 		}
 	}
+	svc.Ports = newPorts
 }
 
 func (c *translateCtx) translateInitContainers(baseName string, podSpec *corev1.PodSpec) []string {
@@ -566,7 +589,11 @@ func (c *translateCtx) translateVolumeMount(
 		}
 
 	case vol.HostPath != nil:
-		mount := vol.HostPath.Path + ":" + mountPath
+		source := vol.HostPath.Path
+		if vm.SubPath != "" {
+			source += "/" + vm.SubPath
+		}
+		mount := source + ":" + mountPath
 		if vm.ReadOnly {
 			mount += ":ro"
 		}
@@ -667,7 +694,7 @@ func (c *translateCtx) applyServicePorts() {
 		c.mapServicePorts(composeSvc, k8sSvc)
 		// K8s Services provide default ports. Reapply the explicit Compose port
 		// override afterwards so host bindings such as 127.0.0.1:4112:4112 win.
-		applyComposePorts(composeSvc, c.composeAnnotations[target])
+		applyComposePorts(composeSvc, c.composeAnnotations[target], c.report)
 
 		c.report.Translated = append(c.report.Translated, ReportEntry{Kind: "Service", Name: k8sSvc.Name})
 	}
