@@ -264,7 +264,11 @@ func (c *translateCtx) translatePodSpec(
 
 		// Store pod labels for K8s Service matching
 		c.svcLabels[name] = serializeLabels(podLabels)
-		c.composeAnnotations[name] = podAnnotations
+		// Store pod annotations only for the primary container, so port overrides
+		// are not accidentally reapplied to sidecars during applyServicePorts.
+		if i == 0 {
+			c.composeAnnotations[name] = podAnnotations
+		}
 
 		c.cf.Services[name] = svc
 	}

@@ -573,7 +573,7 @@ A `hostPath` volume becomes a host bind mount. `volumeMount.subPath` is appended
 to the host source path, and `readOnly` is translated to the `:ro` short-syntax
 suffix.
 
-```
+```text
 hostPath.path = /data, mountPath = /data, subPath = db, readOnly = true
 → /data/db:/data:ro
 ```

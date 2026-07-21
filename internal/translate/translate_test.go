@@ -1604,6 +1604,40 @@ spec:
 				}
 			},
 		},
+		{
+			name:    "pod annotations ports stay on primary container only",
+			svcName: "app-sidecar",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels: {app: app}
+  template:
+    metadata:
+      labels: {app: app}
+      annotations:
+        composed.docker-x/ports: '["127.0.0.1:8080:8080"]'
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+        - name: sidecar
+          image: sidecar:latest
+`,
+			check: func(t *testing.T, result *Result) {
+				primary := result.Compose.Services["app"]
+				if strings.Join(primary.Ports, ",") != "127.0.0.1:8080:8080" {
+					t.Errorf("primary ports = %v, want 127.0.0.1:8080:8080", primary.Ports)
+				}
+				sidecar := result.Compose.Services["app-sidecar"]
+				if len(sidecar.Ports) != 0 {
+					t.Errorf("sidecar ports = %v, want none", sidecar.Ports)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
