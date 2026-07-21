@@ -133,6 +133,28 @@ func doBuild() error {
 
 	// 6. Apply user-declared volumes (override chart-generated ones)
 	applyConfigVolumes(merged, cfg)
+	for _, svc := range merged.Services {
+		for _, secret := range svc.Secrets {
+			if _, exists := merged.Secrets[secret]; !exists {
+				merged.Secrets[secret] = &compose.Secret{File: "/dev/null"}
+			}
+		}
+		if svc.Build != nil {
+			for _, secret := range svc.Build.Secrets {
+				if _, exists := merged.Secrets[secret]; !exists {
+					merged.Secrets[secret] = &compose.Secret{File: "/dev/null"}
+				}
+			}
+		}
+		for _, volume := range svc.Volumes {
+			name, _, ok := strings.Cut(volume, ":")
+			if ok && name != "" && !strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "/") && !strings.HasPrefix(name, "$") {
+				if _, exists := merged.Volumes[name]; !exists {
+					merged.Volumes[name] = &compose.Volume{}
+				}
+			}
+		}
+	}
 
 	// 7. Label all services as composed-managed
 	labelServices(merged, cfg)

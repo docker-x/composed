@@ -1318,3 +1318,48 @@ spec:
 		})
 	}
 }
+
+func TestTranslate_ComposeProjectionAnnotations(t *testing.T) {
+	yaml := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels: {app: app}
+  template:
+    metadata:
+      labels: {app: app}
+      annotations:
+        composed.docker-x/profiles: dev,agent-tools
+        composed.docker-x/working-dir: /workspace
+        composed.docker-x/user: "1000:1000"
+        composed.docker-x/network-mode: service:api
+        composed.docker-x/restart: unless-stopped
+        composed.docker-x/image: ""
+        composed.docker-x/ports: '["127.0.0.1:8080:8080"]'
+        composed.docker-x/depends-on: postgres:service_healthy
+        composed.docker-x/healthcheck: '{"test":["CMD","check"],"interval":"2s","retries":3}'
+    spec:
+      containers:
+        - name: app
+          image: example/app
+`
+	svc := mustTranslate(t, yaml, Opts{}).Compose.Services["app"]
+	if svc.WorkingDir != "/workspace" || svc.User != "1000:1000" || svc.NetworkMode != "service:api" || svc.Restart != "unless-stopped" {
+		t.Fatalf("compose annotations not applied: %#v", svc)
+	}
+	if got := strings.Join(svc.Profiles, ","); got != "dev,agent-tools" {
+		t.Errorf("Profiles = %q", got)
+	}
+	if svc.Healthcheck == nil || strings.Join(svc.Healthcheck.Test, ",") != "CMD,check" {
+		t.Error("healthcheck annotation not applied")
+	}
+	if svc.DependsOn["postgres"].Condition != "service_healthy" {
+		t.Error("depends-on annotation not applied")
+	}
+	if svc.Image != "" || strings.Join(svc.Ports, ",") != "127.0.0.1:8080:8080" {
+		t.Errorf("image/ports annotations not applied: %#v", svc)
+	}
+}
