@@ -136,21 +136,23 @@ func doBuild() error {
 	for _, svc := range merged.Services {
 		for _, secret := range svc.Secrets {
 			if _, exists := merged.Secrets[secret]; !exists {
-				merged.Secrets[secret] = &compose.Secret{File: "/dev/null"}
+				fmt.Fprintf(os.Stderr, "Warning: secret %q referenced but not declared; using placeholder /dev/null\n", secret)
+				merged.Secrets[secret] = compose.NewSecret("/dev/null")
 			}
 		}
 		if svc.Build != nil {
 			for _, secret := range svc.Build.Secrets {
 				if _, exists := merged.Secrets[secret]; !exists {
-					merged.Secrets[secret] = &compose.Secret{File: "/dev/null"}
+					fmt.Fprintf(os.Stderr, "Warning: secret %q referenced by build but not declared; using placeholder /dev/null\n", secret)
+					merged.Secrets[secret] = compose.NewSecret("/dev/null")
 				}
 			}
 		}
 		for _, volume := range svc.Volumes {
-			name, _, ok := strings.Cut(volume, ":")
-			if ok && name != "" && !strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "/") && !strings.HasPrefix(name, "$") {
-				if _, exists := merged.Volumes[name]; !exists {
-					merged.Volumes[name] = &compose.Volume{}
+			source := volumeSource(volume)
+			if source != "" && !isHostPathSource(source) {
+				if _, exists := merged.Volumes[source]; !exists {
+					merged.Volumes[source] = &compose.Volume{}
 				}
 			}
 		}
@@ -511,9 +513,9 @@ func imageToCompose(name string, svc *config.Service) *compose.File {
 
 	// Auto-create named volumes
 	for _, v := range svc.Volumes {
-		parts := strings.SplitN(v, ":", 2)
-		if len(parts) == 2 && !strings.HasPrefix(parts[0], "/") && !strings.HasPrefix(parts[0], ".") {
-			f.Volumes[parts[0]] = &compose.Volume{}
+		source := volumeSource(v)
+		if source != "" && !isHostPathSource(source) {
+			f.Volumes[source] = &compose.Volume{}
 		}
 	}
 
@@ -787,6 +789,8 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 		Services map[string]rawServiceStruct `yaml:"services"`
 		Volumes  map[string]interface{}      `yaml:"volumes"`
 		Networks map[string]interface{}      `yaml:"networks"`
+		Configs  map[string]compose.Config   `yaml:"configs"`
+		Secrets  map[string]compose.Secret   `yaml:"secrets"`
 	}
 
 	if err := yamlUnmarshal(data, &raw); err != nil {
@@ -805,6 +809,16 @@ func parseComposeYAML(data []byte) (*compose.File, error) {
 
 	for name := range raw.Networks {
 		f.Networks[name] = &compose.Network{}
+	}
+
+	for name, cfg := range raw.Configs {
+		c := cfg
+		f.Configs[name] = &c
+	}
+
+	for name, sec := range raw.Secrets {
+		s := sec
+		f.Secrets[name] = &s
 	}
 
 	return f, nil
@@ -993,6 +1007,50 @@ func dockerCompose(args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// volumeSource extracts the source (left-hand) side of a Compose short volume
+// string, handling Windows absolute paths like "C:\data:/container".
+func volumeSource(volume string) string {
+	if hasWindowsDrivePrefix(volume) {
+		// Source is the drive letter plus path up to the *next* colon.
+		if idx := strings.Index(volume[2:], ":"); idx >= 0 {
+			return volume[:2+idx]
+		}
+		return volume
+	}
+	src, _, _ := strings.Cut(volume, ":")
+	return src
+}
+
+// isHostPathSource reports whether a volume source is a host bind mount
+// (absolute, relative, env variable, or Windows drive letter) rather than a
+// named Docker volume.
+func isHostPathSource(source string) bool {
+	if source == "" {
+		return false
+	}
+	if hasWindowsDrivePrefix(source) {
+		return true
+	}
+	return strings.HasPrefix(source, "/") ||
+		strings.HasPrefix(source, ".") ||
+		strings.HasPrefix(source, "$") ||
+		strings.HasPrefix(source, "~/")
+}
+
+func hasWindowsDrivePrefix(s string) bool {
+	if len(s) < 3 {
+		return false
+	}
+	if s[1] != ':' {
+		return false
+	}
+	c := s[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+		return false
+	}
+	return s[2] == '\\' || s[2] == '/'
 }
 
 func yamlUnmarshal(data []byte, v interface{}) error {

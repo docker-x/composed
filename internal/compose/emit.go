@@ -51,8 +51,16 @@ func emitSecrets(doc *yaml.Node, secrets map[string]*Secret) {
 	}
 	n := &yaml.Node{Kind: yaml.MappingNode}
 	for _, name := range sortedKeys(secrets) {
+		sec := secrets[name]
 		inner := &yaml.Node{Kind: yaml.MappingNode}
-		addScalar(inner, "file", secrets[name].File)
+		if sec.External {
+			addBool(inner, "external", true)
+			if sec.Name != "" {
+				addScalar(inner, "name", sec.Name)
+			}
+		} else if sec.File != "" {
+			addScalar(inner, "file", sec.File)
+		}
 		n.Content = append(n.Content, scalarNode(name), inner)
 	}
 	doc.Content = append(doc.Content, scalarNode("secrets"), n)
