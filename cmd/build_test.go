@@ -1278,3 +1278,54 @@ func serviceNames(f *compose.File) []string {
 	}
 	return names
 }
+
+func TestVolumeSourceHelpers(t *testing.T) {
+	tests := []struct {
+		volume string
+		source string
+		bind   bool
+	}{
+		{"data:/container", "data", false},
+		{"/data:/container", "/data", true},
+		{"./data:/container", "./data", true},
+		{"${VAR}:/container", "${VAR}", true},
+		{"C:\\data:/container", "C:\\data", true},
+		{"C:/data:/container", "C:/data", true},
+		{"/data", "/data", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.volume, func(t *testing.T) {
+			source := volumeSource(tt.volume)
+			if source != tt.source {
+				t.Errorf("volumeSource(%q) = %q, want %q", tt.volume, source, tt.source)
+			}
+			if isHostPathSource(source) != tt.bind {
+				t.Errorf("isHostPathSource(%q) = %v, want %v", source, isHostPathSource(source), tt.bind)
+			}
+		})
+	}
+}
+
+func TestParseComposeYAML_TopLevelSecretsAndConfigs(t *testing.T) {
+	yaml := `
+services:
+  app:
+    image: app:latest
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+configs:
+  app_config:
+    file: ./config/app.yaml
+`
+	f, err := parseComposeYAML([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parseComposeYAML: %v", err)
+	}
+	if f.Secrets["db_password"] == nil || f.Secrets["db_password"].File != "./secrets/db_password.txt" {
+		t.Errorf("secrets = %v", f.Secrets)
+	}
+	if f.Configs["app_config"] == nil || f.Configs["app_config"].File != "./config/app.yaml" {
+		t.Errorf("configs = %v", f.Configs)
+	}
+}

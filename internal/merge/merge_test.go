@@ -260,6 +260,58 @@ func TestMerge_ScalarOverrides(t *testing.T) {
 	}
 }
 
+func TestMerge_ServiceNewFields(t *testing.T) {
+	f1 := compose.NewFile()
+	svc1 := compose.NewService("app:v1")
+	svc1.WorkingDir = "/old"
+	svc1.Secrets = []string{"old-secret"}
+	f1.Services["app"] = svc1
+
+	f2 := compose.NewFile()
+	svc2 := compose.NewService("")
+	svc2.WorkingDir = "/new"
+	svc2.User = "1000:1000"
+	svc2.NetworkMode = "service:db"
+	svc2.Restart = "unless-stopped"
+	svc2.Secrets = []string{"new-secret"}
+	f2.Services["app"] = svc2
+
+	result := Merge("test", f1, f2)
+	app := result.Services["app"]
+	if app.WorkingDir != "/new" {
+		t.Errorf("WorkingDir = %q, want /new", app.WorkingDir)
+	}
+	if app.User != "1000:1000" {
+		t.Errorf("User = %q", app.User)
+	}
+	if app.NetworkMode != "service:db" {
+		t.Errorf("NetworkMode = %q", app.NetworkMode)
+	}
+	if app.Restart != "unless-stopped" {
+		t.Errorf("Restart = %q", app.Restart)
+	}
+	if len(app.Secrets) != 2 {
+		t.Errorf("Secrets = %v, want 2 unique", app.Secrets)
+	}
+}
+
+func TestMerge_SecretUnion(t *testing.T) {
+	f1 := compose.NewFile()
+	f1.Secrets["a"] = compose.NewSecret("/a")
+
+	f2 := compose.NewFile()
+	f2.Secrets["b"] = compose.NewSecret("/b")
+	f2.Secrets["a"] = compose.NewSecret("/override") // should not override
+
+	result := Merge("test", f1, f2)
+	if len(result.Secrets) != 2 {
+		t.Errorf("Secrets count = %d, want 2", len(result.Secrets))
+	}
+	if result.Secrets["a"].File != "/a" {
+		t.Errorf("secret a = %q, want /a (first wins)", result.Secrets["a"].File)
+	}
+}
+
 func TestAppendUnique(t *testing.T) {
 	tests := []struct {
 		name  string

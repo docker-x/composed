@@ -1363,3 +1363,256 @@ spec:
 		t.Errorf("image/ports annotations not applied: %#v", svc)
 	}
 }
+
+func TestTranslate_ComposeProjectionAnnotations_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		svcName string
+		check   func(t *testing.T, result *Result)
+	}{
+		{
+			name:    "empty ports annotation does not clear service ports",
+			svcName: "web",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+      annotations:
+        composed.docker-x/ports: ""
+    spec:
+      containers:
+        - name: web
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector: {app: web}
+  ports:
+    - port: 80
+      targetPort: 80
+`,
+			check: func(t *testing.T, result *Result) {
+				svc := result.Compose.Services["web"]
+				found := false
+				for _, p := range svc.Ports {
+					if p == "80:80" {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Ports = %v, want '80:80'", svc.Ports)
+				}
+			},
+		},
+		{
+			name:    "malformed JSON ports preserves service ports and warns",
+			svcName: "api",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+      annotations:
+        composed.docker-x/ports: '[not json]'
+    spec:
+      containers:
+        - name: api
+          image: api:latest
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-svc
+spec:
+  selector: {app: api}
+  ports:
+    - port: 80
+      targetPort: 8080
+`,
+			check: func(t *testing.T, result *Result) {
+				svc := result.Compose.Services["api"]
+				if len(svc.Ports) == 0 {
+					t.Errorf("Ports should not be cleared by malformed JSON: %v", svc.Ports)
+				}
+				found := false
+				for _, w := range result.Report.Warnings {
+					if strings.Contains(w, "invalid JSON in composed.docker-x/ports") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected invalid JSON warning, got %v", result.Report.Warnings)
+				}
+			},
+		},
+		{
+			name:    "depends-on defaults empty condition to service_started",
+			svcName: "app",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels: {app: app}
+  template:
+    metadata:
+      labels: {app: app}
+      annotations:
+        composed.docker-x/depends-on: "db:"
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+`,
+			check: func(t *testing.T, result *Result) {
+				cond := result.Compose.Services["app"].DependsOn["db"]
+				if cond.Condition != "service_started" {
+					t.Errorf("DependsOn condition = %q, want service_started", cond.Condition)
+				}
+			},
+		},
+		{
+			name:    "invalid build JSON emits warning",
+			svcName: "app",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels: {app: app}
+  template:
+    metadata:
+      labels: {app: app}
+      annotations:
+        composed.docker-x/build: '{invalid'
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+`,
+			check: func(t *testing.T, result *Result) {
+				found := false
+				for _, w := range result.Report.Warnings {
+					if strings.Contains(w, "invalid JSON in composed.docker-x/build") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected invalid JSON warning, got %v", result.Report.Warnings)
+				}
+			},
+		},
+		{
+			name:    "hostPath volume includes subPath and readOnly",
+			svcName: "app",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels: {app: app}
+  template:
+    metadata:
+      labels: {app: app}
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              subPath: db
+              readOnly: true
+      volumes:
+        - name: data
+          hostPath:
+            path: /var/lib/data
+`,
+			check: func(t *testing.T, result *Result) {
+				svc := result.Compose.Services["app"]
+				found := false
+				for _, v := range svc.Volumes {
+					if v == "/var/lib/data/db:/data:ro" {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Volumes = %v, want '/var/lib/data/db:/data:ro'", svc.Volumes)
+				}
+			},
+		},
+		{
+			name:    "pod annotations apply to primary container only",
+			svcName: "app-sidecar",
+			yaml: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels: {app: app}
+  template:
+    metadata:
+      labels: {app: app}
+      annotations:
+        composed.docker-x/image: overridden
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+        - name: sidecar
+          image: sidecar:latest
+`,
+			check: func(t *testing.T, result *Result) {
+				primary := result.Compose.Services["app"]
+				if primary.Image != "overridden" {
+					t.Errorf("primary image = %q, want overridden", primary.Image)
+				}
+				sidecar := result.Compose.Services["app-sidecar"]
+				if sidecar.Image != "sidecar:latest" {
+					t.Errorf("sidecar image = %q, want unchanged", sidecar.Image)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mustTranslate(t, tt.yaml, Opts{})
+			if result.Compose.Services[tt.svcName] == nil {
+				t.Fatalf("missing service %q", tt.svcName)
+			}
+			tt.check(t, result)
+		})
+	}
+}
