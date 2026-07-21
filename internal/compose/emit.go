@@ -26,6 +26,7 @@ func Emit(f *File) (string, error) {
 	emitVolumes(doc, f.Volumes)
 	emitNetworks(doc, f.Networks)
 	emitConfigs(doc, f.Configs)
+	emitSecrets(doc, f.Secrets)
 
 	root := &yaml.Node{
 		Kind:    yaml.DocumentNode,
@@ -42,6 +43,27 @@ func Emit(f *File) (string, error) {
 		return "", fmt.Errorf("yaml close: %w", err)
 	}
 	return buf.String(), nil
+}
+
+func emitSecrets(doc *yaml.Node, secrets map[string]*Secret) {
+	if len(secrets) == 0 {
+		return
+	}
+	n := &yaml.Node{Kind: yaml.MappingNode}
+	for _, name := range sortedKeys(secrets) {
+		sec := secrets[name]
+		inner := &yaml.Node{Kind: yaml.MappingNode}
+		if sec.External {
+			addBool(inner, "external", true)
+			if sec.Name != "" {
+				addScalar(inner, "name", sec.Name)
+			}
+		} else if sec.File != "" {
+			addScalar(inner, "file", sec.File)
+		}
+		n.Content = append(n.Content, scalarNode(name), inner)
+	}
+	doc.Content = append(doc.Content, scalarNode("secrets"), n)
 }
 
 func emitServices(doc *yaml.Node, services map[string]*Service) {
@@ -139,6 +161,25 @@ func serviceNode(svc *Service) *yaml.Node {
 
 func addServiceCore(n *yaml.Node, svc *Service) {
 	addScalar(n, "image", svc.Image)
+	if svc.Build != nil {
+		build := &yaml.Node{Kind: yaml.MappingNode}
+		addScalar(build, "context", svc.Build.Context)
+		addScalar(build, "dockerfile", svc.Build.Dockerfile)
+		if len(svc.Build.Args) > 0 {
+			args := &yaml.Node{Kind: yaml.MappingNode}
+			for _, key := range sortedKeysMap(svc.Build.Args) {
+				addScalar(args, key, svc.Build.Args[key])
+			}
+			build.Content = append(build.Content, scalarNode("args"), args)
+		}
+		if len(svc.Build.Secrets) > 0 {
+			addSeq(build, "secrets", svc.Build.Secrets)
+		}
+		n.Content = append(n.Content, scalarNode("build"), build)
+	}
+	addScalar(n, "working_dir", svc.WorkingDir)
+	addScalar(n, "user", svc.User)
+	addScalar(n, "network_mode", svc.NetworkMode)
 
 	if len(svc.Entrypoint) > 0 {
 		addSeq(n, "entrypoint", svc.Entrypoint)
@@ -199,6 +240,9 @@ func addServiceOrchestration(n *yaml.Node, svc *Service) {
 			cfgSeq.Content = append(cfgSeq.Content, item)
 		}
 		n.Content = append(n.Content, scalarNode("configs"), cfgSeq)
+	}
+	if len(svc.Secrets) > 0 {
+		addSeq(n, "secrets", svc.Secrets)
 	}
 	if len(svc.Profiles) > 0 {
 		addSeq(n, "profiles", svc.Profiles)
