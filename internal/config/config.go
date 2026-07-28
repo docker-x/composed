@@ -265,12 +265,19 @@ func parseShellEntries(node *yaml.Node) ([]NamedShellEntry, error) {
 	return entries, nil
 }
 
+// EffectiveProjectPrefix returns the effective, normalized project prefix,
+// preferring the CLI flag over the configured x-project-prefix.
+func EffectiveProjectPrefix(cfg *File, flagPrefix string) string {
+	prefix := normalizeProjectName(strings.TrimSpace(flagPrefix))
+	if prefix == "" {
+		prefix = normalizeProjectName(strings.TrimSpace(cfg.ProjectPrefix))
+	}
+	return prefix
+}
+
 // EffectiveProjectName returns the compose project name, optionally prefixed.
 func EffectiveProjectName(cfg *File, flagPrefix string) string {
-	prefix := strings.TrimSpace(flagPrefix)
-	if prefix == "" {
-		prefix = strings.TrimSpace(cfg.ProjectPrefix)
-	}
+	prefix := EffectiveProjectPrefix(cfg, flagPrefix)
 	name := strings.TrimSpace(cfg.Name)
 	if prefix == "" {
 		return name
@@ -279,6 +286,31 @@ func EffectiveProjectName(cfg *File, flagPrefix string) string {
 		return prefix
 	}
 	return prefix + "-" + name
+}
+
+// normalizeProjectName returns a Docker Compose-compatible identifier:
+// lowercase alphanumerics, underscores and hyphens only, with no leading or
+// trailing separators and no repeated separators.
+func normalizeProjectName(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	lastHyphen := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastHyphen = false
+		default:
+			if !lastHyphen {
+				b.WriteRune('-')
+				lastHyphen = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // ResolveRefs resolves cross-service references and helm values.

@@ -474,10 +474,7 @@ func applyConfigVolumes(merged *compose.File, cfg *config.File) {
 }
 
 func labelServices(merged *compose.File, cfg *config.File, flagPrefix string) {
-	prefix := strings.TrimSpace(flagPrefix)
-	if prefix == "" {
-		prefix = strings.TrimSpace(cfg.ProjectPrefix)
-	}
+	prefix := config.EffectiveProjectPrefix(cfg, flagPrefix)
 	for _, svc := range merged.Services {
 		if svc.Labels == nil {
 			svc.Labels = make(map[string]string)
@@ -486,6 +483,8 @@ func labelServices(merged *compose.File, cfg *config.File, flagPrefix string) {
 		svc.Labels["com.composed.project"] = cfg.Name
 		if prefix != "" {
 			svc.Labels["com.composed.project-prefix"] = prefix
+		} else {
+			delete(svc.Labels, "com.composed.project-prefix")
 		}
 	}
 }

@@ -1167,6 +1167,12 @@ func TestEffectiveProjectName(t *testing.T) {
 	if got := EffectiveProjectName(&File{ProjectPrefix: "acme"}, ""); got != "acme" {
 		t.Fatalf("prefix only = %q, want acme", got)
 	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "Acme/Team"}, ""); got != "acme-team-litellm" {
+		t.Fatalf("normalized prefix = %q, want acme-team-litellm", got)
+	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "  !@#  "}, ""); got != "litellm" {
+		t.Fatalf("invalid prefix ignored = %q, want litellm", got)
+	}
 }
 
 func TestParseProjectPrefix(t *testing.T) {

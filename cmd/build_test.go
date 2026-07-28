@@ -687,6 +687,26 @@ func TestLabelServices(t *testing.T) {
 			t.Error("unexpected project-prefix label for whitespace-only prefix")
 		}
 	})
+
+	t.Run("normalizes prefix label", func(t *testing.T) {
+		svc := svcWithPrefix(&config.File{Name: "litellm", ProjectPrefix: "Acme/Team"}, "")
+		if svc.Labels["com.composed.project-prefix"] != "acme-team" {
+			t.Errorf("project-prefix label = %q", svc.Labels["com.composed.project-prefix"])
+		}
+	})
+
+	t.Run("removes stale project-prefix label when no effective prefix", func(t *testing.T) {
+		merged := compose.NewFile()
+		svc := compose.NewService("nginx:latest")
+		svc.Labels = map[string]string{"com.composed.project-prefix": "stale"}
+		merged.Services["web"] = svc
+
+		labelServices(merged, &config.File{Name: "litellm"}, "")
+
+		if _, ok := merged.Services["web"].Labels["com.composed.project-prefix"]; ok {
+			t.Error("stale project-prefix label was not removed")
+		}
+	})
 }
 
 func TestParseComposeYAML(t *testing.T) {

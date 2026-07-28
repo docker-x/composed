@@ -126,7 +126,8 @@ Docker Compose ignores `x-` fields, so plain image services work with
 ### Top-level `x-project-prefix`
 
 A top-level `x-project-prefix` namespaces the generated Compose project name.
-When present, the emitted `name:` becomes `{prefix}-{name}` (e.g. `acme-litellm`).
+When both values are present, the emitted `name:` becomes `{prefix}-{name}`
+(e.g. `acme-litellm`). If `name:` is empty, the effective name is `{prefix}`.
 The `--project-prefix` CLI flag overrides the configured value. When neither is
 set, the project name is the configured `name:` unchanged.
 
@@ -140,9 +141,15 @@ services:
       path: ./dist
 ```
 
+Prefixes are normalized to Docker Compose-compatible identifiers
+(lowercase alphanumerics, hyphens and underscores; other characters become
+hyphens and consecutive separators collapse). Whitespace around the prefix is
+trimmed, and an empty or all-invalid prefix is treated as unset.
+
 Generated services receive a `com.composed.project-prefix` label with the
-effective prefix (CLI flag wins over configured value). Whitespace around the
-prefix is trimmed, and an empty prefix is treated as unset.
+effective normalized prefix (CLI flag wins over configured value). If no
+effective prefix is set, any pre-existing `com.composed.project-prefix` label
+is removed from generated services.
 
 ### Service types (inferred from extensions)
 
