@@ -1155,12 +1155,17 @@ func TestFileMarshalYAML_PreservesXShell(t *testing.T) {
 }
 
 func TestEffectiveProjectName(t *testing.T) {
-	cfg := &File{Name: "litellm", ProjectPrefix: "acme"}
-	if got := EffectiveProjectName(cfg, ""); got != "acme-litellm" {
-		t.Fatalf("EffectiveProjectName() = %q, want acme-litellm", got)
+	if got := EffectiveProjectName(&File{Name: "litellm"}, ""); got != "litellm" {
+		t.Fatalf("unprefixed name = %q, want litellm", got)
 	}
-	if got := EffectiveProjectName(cfg, "override"); got != "override-litellm" {
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "acme"}, ""); got != "acme-litellm" {
+		t.Fatalf("configured prefix = %q, want acme-litellm", got)
+	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "acme"}, "override"); got != "override-litellm" {
 		t.Fatalf("flag override = %q, want override-litellm", got)
+	}
+	if got := EffectiveProjectName(&File{ProjectPrefix: "acme"}, ""); got != "acme" {
+		t.Fatalf("prefix only = %q, want acme", got)
 	}
 }
 

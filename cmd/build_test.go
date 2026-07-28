@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/docker-x/composed/internal/compose"
@@ -594,6 +595,109 @@ func TestApplyConfigVolumes(t *testing.T) {
 
 		if merged.Volumes["data"].External {
 			t.Error("should not have been modified")
+		}
+	})
+}
+
+func TestDoBuild_ProjectPrefix(t *testing.T) {
+	// Save and restore global command state so parallel tests are not affected.
+	origBuildFile := buildFile
+	origBuildOutput := buildOutput
+	origBuildProjectPrefix := buildProjectPrefix
+	t.Cleanup(func() {
+		buildFile = origBuildFile
+		buildOutput = origBuildOutput
+		buildProjectPrefix = origBuildProjectPrefix
+	})
+
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "composed.yaml")
+	outPath := filepath.Join(tmpDir, "docker-compose.yaml")
+
+	if err := os.WriteFile(cfgPath, []byte(`
+name: litellm
+x-project-prefix: acme
+services:
+  web:
+    image: nginx:latest
+`), 0o644); err != nil {
+		t.Fatalf("write composed.yaml: %v", err)
+	}
+
+	buildFile = cfgPath
+	buildOutput = outPath
+	buildProjectPrefix = "override"
+
+	if err := doBuild(); err != nil {
+		t.Fatalf("doBuild: %v", err)
+	}
+
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+
+	if !strings.Contains(string(out), "name: override-litellm") {
+		t.Errorf("output missing prefixed project name:\n%s", out)
+	}
+	if !strings.Contains(string(out), "com.composed.project-prefix: override") {
+		t.Errorf("output missing effective project-prefix label:\n%s", out)
+	}
+}
+
+func TestLabelServices(t *testing.T) {
+	t.Run("adds managed and project labels", func(t *testing.T) {
+		merged := compose.NewFile()
+		merged.Services["web"] = compose.NewService("nginx:latest")
+
+		cfg := &config.File{Name: "litellm"}
+		labelServices(merged, cfg, "")
+
+		svc := merged.Services["web"]
+		if svc.Labels["com.composed.managed"] != "true" {
+			t.Errorf("managed label = %q", svc.Labels["com.composed.managed"])
+		}
+		if svc.Labels["com.composed.project"] != "litellm" {
+			t.Errorf("project label = %q", svc.Labels["com.composed.project"])
+		}
+		if _, ok := svc.Labels["com.composed.project-prefix"]; ok {
+			t.Error("unexpected project-prefix label")
+		}
+	})
+
+	t.Run("uses configured prefix", func(t *testing.T) {
+		merged := compose.NewFile()
+		merged.Services["web"] = compose.NewService("nginx:latest")
+
+		labelServices(merged, &config.File{Name: "litellm", ProjectPrefix: "acme"}, "")
+
+		svc := merged.Services["web"]
+		if svc.Labels["com.composed.project-prefix"] != "acme" {
+			t.Errorf("project-prefix label = %q", svc.Labels["com.composed.project-prefix"])
+		}
+	})
+
+	t.Run("cli flag overrides configured prefix", func(t *testing.T) {
+		merged := compose.NewFile()
+		merged.Services["web"] = compose.NewService("nginx:latest")
+
+		labelServices(merged, &config.File{Name: "litellm", ProjectPrefix: "acme"}, "override")
+
+		svc := merged.Services["web"]
+		if svc.Labels["com.composed.project-prefix"] != "override" {
+			t.Errorf("project-prefix label = %q", svc.Labels["com.composed.project-prefix"])
+		}
+	})
+
+	t.Run("trimmed whitespace and empty prefix omitted", func(t *testing.T) {
+		merged := compose.NewFile()
+		merged.Services["web"] = compose.NewService("nginx:latest")
+
+		labelServices(merged, &config.File{Name: "litellm", ProjectPrefix: "  "}, "")
+
+		svc := merged.Services["web"]
+		if _, ok := svc.Labels["com.composed.project-prefix"]; ok {
+			t.Error("unexpected project-prefix label for whitespace-only prefix")
 		}
 	})
 }
