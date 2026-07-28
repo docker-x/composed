@@ -65,11 +65,11 @@ type File struct {
 func (f File) MarshalYAML() (interface{}, error) {
 	// Build a proxy struct with the standard fields.
 	type plain struct {
-		Name          string                  `yaml:"name"`
-		XProjectPrefix string                 `yaml:"x-project-prefix,omitempty"`
-		XShell        yaml.Node               `yaml:"x-shell,omitempty"`
-		Services map[string]Service      `yaml:"services"`
-		Volumes  map[string]VolumeConfig `yaml:"volumes,omitempty"`
+		Name           string                  `yaml:"name"`
+		XProjectPrefix string                  `yaml:"x-project-prefix,omitempty"`
+		XShell         yaml.Node               `yaml:"x-shell,omitempty"`
+		Services       map[string]Service      `yaml:"services"`
+		Volumes        map[string]VolumeConfig `yaml:"volumes,omitempty"`
 	}
 	p := plain{
 		Name:           f.Name,
@@ -280,8 +280,10 @@ func EffectiveProjectName(cfg *File, flagPrefix string) string {
 	}
 	return prefix + "-" + name
 }
-// and helm values. Resolution priority: x-exports first, then direct
-// field lookup (environment, hostname, image, ports).
+
+// ResolveRefs resolves cross-service references and helm values.
+// Resolution priority: x-exports first, then direct field lookup
+// (environment, hostname, image, ports).
 // shellValues contains captured stdout from x-shell entries.
 func (f *File) ResolveRefs(shellValues map[string]string) error {
 	exports := buildExportIndex(f, shellValues)
