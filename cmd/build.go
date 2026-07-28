@@ -163,7 +163,7 @@ func doBuild() error {
 	}
 
 	// 7. Label all services as composed-managed
-	labelServices(merged, cfg)
+	labelServices(merged, cfg, buildProjectPrefix)
 
 	// 8. Set header
 	names := make([]string, 0, len(cfg.Services))
@@ -473,14 +473,18 @@ func applyConfigVolumes(merged *compose.File, cfg *config.File) {
 	}
 }
 
-func labelServices(merged *compose.File, cfg *config.File) {
+func labelServices(merged *compose.File, cfg *config.File, flagPrefix string) {
+	prefix := strings.TrimSpace(flagPrefix)
+	if prefix == "" {
+		prefix = strings.TrimSpace(cfg.ProjectPrefix)
+	}
 	for _, svc := range merged.Services {
 		if svc.Labels == nil {
 			svc.Labels = make(map[string]string)
 		}
 		svc.Labels["com.composed.managed"] = "true"
 		svc.Labels["com.composed.project"] = cfg.Name
-		if prefix := strings.TrimSpace(cfg.ProjectPrefix); prefix != "" {
+		if prefix != "" {
 			svc.Labels["com.composed.project-prefix"] = prefix
 		}
 	}
