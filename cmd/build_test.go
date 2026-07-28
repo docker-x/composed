@@ -646,14 +646,16 @@ services:
 }
 
 func TestLabelServices(t *testing.T) {
-	t.Run("adds managed and project labels", func(t *testing.T) {
+	svcWithPrefix := func(cfg *config.File, flagPrefix string) *compose.Service {
+		t.Helper()
 		merged := compose.NewFile()
 		merged.Services["web"] = compose.NewService("nginx:latest")
+		labelServices(merged, cfg, flagPrefix)
+		return merged.Services["web"]
+	}
 
-		cfg := &config.File{Name: "litellm"}
-		labelServices(merged, cfg, "")
-
-		svc := merged.Services["web"]
+	t.Run("adds managed and project labels", func(t *testing.T) {
+		svc := svcWithPrefix(&config.File{Name: "litellm"}, "")
 		if svc.Labels["com.composed.managed"] != "true" {
 			t.Errorf("managed label = %q", svc.Labels["com.composed.managed"])
 		}
@@ -666,36 +668,21 @@ func TestLabelServices(t *testing.T) {
 	})
 
 	t.Run("uses configured prefix", func(t *testing.T) {
-		merged := compose.NewFile()
-		merged.Services["web"] = compose.NewService("nginx:latest")
-
-		labelServices(merged, &config.File{Name: "litellm", ProjectPrefix: "acme"}, "")
-
-		svc := merged.Services["web"]
+		svc := svcWithPrefix(&config.File{Name: "litellm", ProjectPrefix: "acme"}, "")
 		if svc.Labels["com.composed.project-prefix"] != "acme" {
 			t.Errorf("project-prefix label = %q", svc.Labels["com.composed.project-prefix"])
 		}
 	})
 
 	t.Run("cli flag overrides configured prefix", func(t *testing.T) {
-		merged := compose.NewFile()
-		merged.Services["web"] = compose.NewService("nginx:latest")
-
-		labelServices(merged, &config.File{Name: "litellm", ProjectPrefix: "acme"}, "override")
-
-		svc := merged.Services["web"]
+		svc := svcWithPrefix(&config.File{Name: "litellm", ProjectPrefix: "acme"}, "override")
 		if svc.Labels["com.composed.project-prefix"] != "override" {
 			t.Errorf("project-prefix label = %q", svc.Labels["com.composed.project-prefix"])
 		}
 	})
 
 	t.Run("trimmed whitespace and empty prefix omitted", func(t *testing.T) {
-		merged := compose.NewFile()
-		merged.Services["web"] = compose.NewService("nginx:latest")
-
-		labelServices(merged, &config.File{Name: "litellm", ProjectPrefix: "  "}, "")
-
-		svc := merged.Services["web"]
+		svc := svcWithPrefix(&config.File{Name: "litellm", ProjectPrefix: "  "}, "")
 		if _, ok := svc.Labels["com.composed.project-prefix"]; ok {
 			t.Error("unexpected project-prefix label for whitespace-only prefix")
 		}
