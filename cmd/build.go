@@ -43,11 +43,12 @@ Examples:
 }
 
 var (
-	buildFile   string
-	buildOutput string
-	upFile      string
-	upOutput    string
-	downOutput  string
+	buildFile          string
+	buildOutput        string
+	buildProjectPrefix string
+	upFile             string
+	upOutput           string
+	downOutput         string
 )
 
 var upCmd = &cobra.Command{
@@ -65,10 +66,12 @@ var downCmd = &cobra.Command{
 func init() {
 	buildCmd.Flags().StringVarP(&buildFile, "file", "f", "composed.yaml", "Config file")
 	buildCmd.Flags().StringVarP(&buildOutput, "output", "o", defaultOutputFile, "Output file (- for stdout)")
+	buildCmd.Flags().StringVar(&buildProjectPrefix, "project-prefix", "", "Prefix for compose project name (overrides x-project-prefix)")
 	rootCmd.AddCommand(buildCmd)
 
 	upCmd.Flags().StringVarP(&upFile, "file", "f", "composed.yaml", "Config file")
 	upCmd.Flags().StringVarP(&upOutput, "output", "o", defaultOutputFile, "Output file")
+	upCmd.Flags().StringVar(&buildProjectPrefix, "project-prefix", "", "Prefix for compose project name (overrides x-project-prefix)")
 	downCmd.Flags().StringVarP(&downOutput, "output", "o", defaultOutputFile, "Compose file")
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
@@ -129,7 +132,8 @@ func doBuild() error {
 	}
 
 	// 5. Merge all fragments
-	merged := merge.Merge(cfg.Name, fragments...)
+	projectName := config.EffectiveProjectName(cfg, buildProjectPrefix)
+	merged := merge.Merge(projectName, fragments...)
 
 	// 6. Apply user-declared volumes (override chart-generated ones)
 	applyConfigVolumes(merged, cfg)
@@ -159,7 +163,7 @@ func doBuild() error {
 	}
 
 	// 7. Label all services as composed-managed
-	labelServices(merged, cfg)
+	labelServices(merged, cfg, buildProjectPrefix)
 
 	// 8. Set header
 	names := make([]string, 0, len(cfg.Services))
@@ -469,13 +473,19 @@ func applyConfigVolumes(merged *compose.File, cfg *config.File) {
 	}
 }
 
-func labelServices(merged *compose.File, cfg *config.File) {
+func labelServices(merged *compose.File, cfg *config.File, flagPrefix string) {
+	prefix := config.EffectiveProjectPrefix(cfg, flagPrefix)
 	for _, svc := range merged.Services {
 		if svc.Labels == nil {
 			svc.Labels = make(map[string]string)
 		}
 		svc.Labels["com.composed.managed"] = "true"
 		svc.Labels["com.composed.project"] = cfg.Name
+		if prefix != "" {
+			svc.Labels["com.composed.project-prefix"] = prefix
+		} else {
+			delete(svc.Labels, "com.composed.project-prefix")
+		}
 	}
 }
 

@@ -52,10 +52,11 @@ func (f *FlexStringSlice) UnmarshalYAML(value *yaml.Node) error {
 // File is the top-level composed.yaml structure.
 // It is a valid Docker Compose file extended with x- fields.
 type File struct {
-	Name     string                  `yaml:"name"`
-	Services map[string]Service      `yaml:"services"`
-	Volumes  map[string]VolumeConfig `yaml:"volumes,omitempty"`
-	XShell   []NamedShellEntry       `yaml:"-"`
+	Name          string                  `yaml:"name"`
+	ProjectPrefix string                  `yaml:"x-project-prefix,omitempty"`
+	Services      map[string]Service      `yaml:"services"`
+	Volumes       map[string]VolumeConfig `yaml:"volumes,omitempty"`
+	XShell        []NamedShellEntry       `yaml:"-"`
 }
 
 // MarshalYAML implements yaml.Marshaler for File, ensuring x-shell entries
@@ -64,15 +65,17 @@ type File struct {
 func (f File) MarshalYAML() (interface{}, error) {
 	// Build a proxy struct with the standard fields.
 	type plain struct {
-		Name     string                  `yaml:"name"`
-		XShell   yaml.Node               `yaml:"x-shell,omitempty"`
-		Services map[string]Service      `yaml:"services"`
-		Volumes  map[string]VolumeConfig `yaml:"volumes,omitempty"`
+		Name           string                  `yaml:"name"`
+		XProjectPrefix string                  `yaml:"x-project-prefix,omitempty"`
+		XShell         yaml.Node               `yaml:"x-shell,omitempty"`
+		Services       map[string]Service      `yaml:"services"`
+		Volumes        map[string]VolumeConfig `yaml:"volumes,omitempty"`
 	}
 	p := plain{
-		Name:     f.Name,
-		Services: f.Services,
-		Volumes:  f.Volumes,
+		Name:           f.Name,
+		XProjectPrefix: f.ProjectPrefix,
+		Services:       f.Services,
+		Volumes:        f.Volumes,
 	}
 
 	if len(f.XShell) > 0 {
@@ -262,9 +265,57 @@ func parseShellEntries(node *yaml.Node) ([]NamedShellEntry, error) {
 	return entries, nil
 }
 
-// ResolveRefs resolves ${service.key} references in environment values
-// and helm values. Resolution priority: x-exports first, then direct
-// field lookup (environment, hostname, image, ports).
+// EffectiveProjectPrefix returns the effective, normalized project prefix,
+// preferring the CLI flag over the configured x-project-prefix.
+func EffectiveProjectPrefix(cfg *File, flagPrefix string) string {
+	prefix := normalizeProjectName(strings.TrimSpace(flagPrefix))
+	if prefix == "" {
+		prefix = normalizeProjectName(strings.TrimSpace(cfg.ProjectPrefix))
+	}
+	return prefix
+}
+
+// EffectiveProjectName returns the compose project name, optionally prefixed.
+func EffectiveProjectName(cfg *File, flagPrefix string) string {
+	prefix := EffectiveProjectPrefix(cfg, flagPrefix)
+	name := strings.TrimSpace(cfg.Name)
+	if prefix == "" {
+		return name
+	}
+	if name == "" {
+		return prefix
+	}
+	return prefix + "-" + name
+}
+
+// normalizeProjectName returns a Docker Compose-compatible identifier:
+// lowercase alphanumerics, underscores and hyphens only, with no leading or
+// trailing separators and no repeated separators.
+func normalizeProjectName(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	lastHyphen := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastHyphen = false
+		default:
+			if !lastHyphen {
+				b.WriteRune('-')
+				lastHyphen = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// ResolveRefs resolves cross-service references and helm values.
+// Resolution priority: x-exports first, then direct field lookup
+// (environment, hostname, image, ports).
 // shellValues contains captured stdout from x-shell entries.
 func (f *File) ResolveRefs(shellValues map[string]string) error {
 	exports := buildExportIndex(f, shellValues)
