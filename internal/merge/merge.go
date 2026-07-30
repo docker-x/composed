@@ -153,6 +153,15 @@ func mergeService(dst, src *compose.Service) {
 	// Append unique volumes
 	dst.Volumes = appendUnique(dst.Volumes, src.Volumes...)
 
+	// Append unique env files and configs. These are service-level references
+	// and must be merged alongside the top-level definitions.
+	dst.EnvFile = appendUnique(dst.EnvFile, src.EnvFile...)
+	dst.Configs = appendUniqueConfigs(dst.Configs, src.Configs...)
+	dst.Tmpfs = appendUnique(dst.Tmpfs, src.Tmpfs...)
+	if src.ShmSize != "" {
+		dst.ShmSize = src.ShmSize
+	}
+
 	// Append unique secrets
 	dst.Secrets = appendUnique(dst.Secrets, src.Secrets...)
 
@@ -169,6 +178,21 @@ func appendUnique(dst []string, items ...string) []string {
 		if !seen[s] {
 			dst = append(dst, s)
 			seen[s] = true
+		}
+	}
+	return dst
+}
+
+func appendUniqueConfigs(dst []compose.ServiceConfig, items ...compose.ServiceConfig) []compose.ServiceConfig {
+	seen := make(map[string]bool, len(dst))
+	for _, cfg := range dst {
+		seen[cfg.Source+"\x00"+cfg.Target] = true
+	}
+	for _, cfg := range items {
+		key := cfg.Source + "\x00" + cfg.Target
+		if !seen[key] {
+			dst = append(dst, cfg)
+			seen[key] = true
 		}
 	}
 	return dst

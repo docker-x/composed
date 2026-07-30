@@ -265,6 +265,9 @@ func TestMerge_ServiceNewFields(t *testing.T) {
 	svc1 := compose.NewService("app:v1")
 	svc1.WorkingDir = "/old"
 	svc1.Secrets = []string{"old-secret"}
+	svc1.Configs = []compose.ServiceConfig{{Source: "old-config", Target: "/etc/old"}}
+	svc1.EnvFile = []string{"old.env"}
+	svc1.Tmpfs = []string{"/tmp/old"}
 	f1.Services["app"] = svc1
 
 	f2 := compose.NewFile()
@@ -274,6 +277,10 @@ func TestMerge_ServiceNewFields(t *testing.T) {
 	svc2.NetworkMode = "service:db"
 	svc2.Restart = "unless-stopped"
 	svc2.Secrets = []string{"new-secret"}
+	svc2.Configs = []compose.ServiceConfig{{Source: "new-config", Target: "/etc/new"}}
+	svc2.EnvFile = []string{"new.env"}
+	svc2.Tmpfs = []string{"/tmp/new"}
+	svc2.ShmSize = "64m"
 	f2.Services["app"] = svc2
 
 	result := Merge("test", f1, f2)
@@ -292,6 +299,15 @@ func TestMerge_ServiceNewFields(t *testing.T) {
 	}
 	if len(app.Secrets) != 2 {
 		t.Errorf("Secrets = %v, want 2 unique", app.Secrets)
+	}
+	if len(app.Configs) != 2 {
+		t.Errorf("Configs = %v, want 2 unique", app.Configs)
+	}
+	if len(app.EnvFile) != 2 {
+		t.Errorf("EnvFile = %v, want 2 unique", app.EnvFile)
+	}
+	if len(app.Tmpfs) != 2 || app.ShmSize != "64m" {
+		t.Errorf("Tmpfs/ShmSize = %v/%q, want 2 entries/64m", app.Tmpfs, app.ShmSize)
 	}
 }
 
