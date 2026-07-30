@@ -23,8 +23,9 @@ Kubernetes manifests into a Docker Compose file that runs on plain Docker.
 ```
 composed init [--project <name>]                              # create composed.yaml
 composed add [name] <source> [flags]                          # add service (auto-detects type)
-composed build [-f composed.yaml] [-o docker-compose.yaml]    # build compose from config
-composed up [-f composed.yaml]                                # build + docker compose up
+composed build [-f composed.yaml] [-o docker-compose.yaml] [--project-prefix <prefix>]
+                              # build compose from config
+composed up [-f composed.yaml] [--project-prefix <prefix>]  # build + docker compose up
 composed down                                                 # docker compose down
 ```
 
@@ -93,12 +94,14 @@ Merge priority (low → high): `values_file` → inline `values:` → `--set`
 composed build                                   # finds composed.yaml walking up from cwd
 composed build -f composed.yaml -o output.yaml   # explicit paths
 composed build -o -                              # stdout
+composed build --project-prefix acme             # override x-project-prefix from CLI
 ```
 
 ### `up` — build and start
 
 ```bash
 composed up
+composed up --project-prefix acme                # override x-project-prefix for the running stack
 ```
 
 ### `down` — stop the stack
@@ -119,6 +122,34 @@ fields ([Docker Compose extension mechanism](https://docs.docker.com/reference/c
 Docker Compose ignores `x-` fields, so plain image services work with
 `docker compose up` directly. Services with `x-helm` or `x-compose-file` need
 `composed build` to resolve into real services.
+
+### Top-level `x-project-prefix`
+
+A top-level `x-project-prefix` namespaces the generated Compose project name.
+When both values are present, the emitted `name:` becomes `{prefix}-{name}`
+(e.g. `acme-litellm`). If `name:` is empty, the effective name is `{prefix}`.
+The `--project-prefix` CLI flag overrides the configured value. When neither is
+set, the project name is the configured `name:` unchanged.
+
+```yaml
+name: litellm
+x-project-prefix: acme
+services:
+  stack:
+    x-k8s:
+      command: cdk8s synth
+      path: ./dist
+```
+
+Prefixes are normalized to Docker Compose-compatible identifiers
+(lowercase alphanumerics, hyphens and underscores; other characters become
+hyphens and consecutive separators collapse). Whitespace around the prefix is
+trimmed, and an empty or all-invalid prefix is treated as unset.
+
+Generated services receive a `com.composed.project-prefix` label with the
+effective normalized prefix (CLI flag wins over configured value). If no
+effective prefix is set, any pre-existing `com.composed.project-prefix` label
+is removed from generated services.
 
 ### Service types (inferred from extensions)
 

@@ -1153,3 +1153,37 @@ func TestFileMarshalYAML_PreservesXShell(t *testing.T) {
 		t.Errorf("XShell[1] = %+v, want risky/allow_failure=true", f2.XShell[1])
 	}
 }
+
+func TestEffectiveProjectName(t *testing.T) {
+	if got := EffectiveProjectName(&File{Name: "litellm"}, ""); got != "litellm" {
+		t.Fatalf("unprefixed name = %q, want litellm", got)
+	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "acme"}, ""); got != "acme-litellm" {
+		t.Fatalf("configured prefix = %q, want acme-litellm", got)
+	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "acme"}, "override"); got != "override-litellm" {
+		t.Fatalf("flag override = %q, want override-litellm", got)
+	}
+	if got := EffectiveProjectName(&File{ProjectPrefix: "acme"}, ""); got != "acme" {
+		t.Fatalf("prefix only = %q, want acme", got)
+	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "Acme/Team"}, ""); got != "acme-team-litellm" {
+		t.Fatalf("normalized prefix = %q, want acme-team-litellm", got)
+	}
+	if got := EffectiveProjectName(&File{Name: "litellm", ProjectPrefix: "  !@#  "}, ""); got != "litellm" {
+		t.Fatalf("invalid prefix ignored = %q, want litellm", got)
+	}
+}
+
+func TestParseProjectPrefix(t *testing.T) {
+	f, err := Parse([]byte(`name: mastra
+x-project-prefix: acme
+services: {}
+`))
+	if err != nil {
+		t.Fatalf(errFmtParse, err)
+	}
+	if f.ProjectPrefix != "acme" {
+		t.Fatalf("ProjectPrefix = %q, want acme", f.ProjectPrefix)
+	}
+}
