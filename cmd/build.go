@@ -542,6 +542,10 @@ func composeFragment(svc *config.Service) (*compose.File, error) {
 		dir := filepath.Dir(buildFile)
 		path = filepath.Join(dir, path)
 	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve compose file path %s: %w", path, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read compose file %s: %w", path, err)
@@ -575,9 +579,10 @@ func normalizeEnvFilePaths(f *compose.File, compDir, outDir string) {
 // resolveEnvFilePath normalizes a fragment-relative env_file path so it can be
 // resolved from the generated output project. Relative paths are made absolute
 // against compDir; when an output directory is known, the absolute path is
-// rebased relative to that output directory.
+// rebased relative to that output directory. Variable-interpolation paths
+// ($VAR or ${VAR}) are preserved verbatim.
 func resolveEnvFilePath(ef, compDir, outDir string) string {
-	if filepath.IsAbs(ef) {
+	if filepath.IsAbs(ef) || strings.HasPrefix(ef, "$") || strings.Contains(ef, "${") {
 		return ef
 	}
 	abs := filepath.Join(compDir, ef)

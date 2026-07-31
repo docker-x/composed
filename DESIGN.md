@@ -270,6 +270,13 @@ blocks to make values available for `${service.environment.KEY}` cross-reference
 Preloaded values are used only for resolution — they are not duplicated in the
 output.
 
+When a component declares `env_file`, the path is resolved relative to the
+component file's directory and then rebased relative to the generated output
+project (the directory containing `buildOutput`). This ensures the generated
+`docker-compose.yaml` can resolve the file no matter where the build is run from.
+Paths containing variable interpolation (`$VAR` or `${VAR}`) are preserved
+verbatim.
+
 ### `x-shell` — Run host commands during build (top-level)
 
 `x-shell` is a **top-level** key (not inside `services:`). It runs shell commands
@@ -411,8 +418,9 @@ to Docker Compose, which loads the values at container start.
 ### Standard compose fields
 
 All standard Docker Compose service fields work as-is on any service:
-`image`, `environment`, `ports`, `volumes`, `command`, `entrypoint`,
-`healthcheck`, `labels`, `depends_on`, `restart`, etc.
+`image`, `environment`, `env_file`, `ports`, `volumes`, `configs`, `tmpfs`,
+`shm_size`, `command`, `entrypoint`, `healthcheck`, `labels`, `depends_on`,
+`restart`, etc.
 
 ### Top-level `volumes:`
 

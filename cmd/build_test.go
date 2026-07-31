@@ -1560,3 +1560,33 @@ services:
 		}
 	}
 }
+
+func TestResolveEnvFilePath(t *testing.T) {
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "components", "app")
+	outDir := dir
+	if err := os.MkdirAll(compDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		ef   string
+		want string
+	}{
+		{"relative to component", ".env", "components/app/.env"},
+		{"nested relative", "config/app.env", "components/app/config/app.env"},
+		{"absolute unchanged", "/etc/app.env", "/etc/app.env"},
+		{"variable prefix", "$ENV_DIR/app.env", "$ENV_DIR/app.env"},
+		{"variable interpolation", "${ENV_DIR}/app.env", "${ENV_DIR}/app.env"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveEnvFilePath(tt.ef, compDir, outDir)
+			if got != tt.want {
+				t.Errorf("resolveEnvFilePath(%q) = %q, want %q", tt.ef, got, tt.want)
+			}
+		})
+	}
+}
