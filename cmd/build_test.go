@@ -844,6 +844,42 @@ func TestParseEnvFileList(t *testing.T) {
 	}
 }
 
+func TestParseConfigs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  []compose.ServiceConfig
+	}{
+		{"nil", nil, nil},
+		{"string", "my-config", []compose.ServiceConfig{{Source: "my-config"}}},
+		{"list of strings", []interface{}{"a", "b"}, []compose.ServiceConfig{{Source: "a"}, {Source: "b"}}},
+		{"list of objects", []interface{}{
+			map[string]interface{}{"source": "cfg", "target": "/etc/cfg"},
+		}, []compose.ServiceConfig{{Source: "cfg", Target: "/etc/cfg"}}},
+		{"missing source skipped", []interface{}{
+			map[string]interface{}{"target": "/etc/cfg"},
+		}, nil},
+		{"mixed", []interface{}{
+			"short",
+			map[string]interface{}{"source": "obj", "target": "/t"},
+		}, []compose.ServiceConfig{{Source: "short"}, {Source: "obj", Target: "/t"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConfigs(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseConfigs len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %v, want %v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestLoadEnvFile(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
