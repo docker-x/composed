@@ -1440,3 +1440,87 @@ configs:
 		t.Errorf("configs = %v", f.Configs)
 	}
 }
+
+func TestDoBuild_XComposeFile_WithServiceRefs(t *testing.T) {
+	origBuildFile := buildFile
+	origBuildOutput := buildOutput
+	origBuildProjectPrefix := buildProjectPrefix
+	t.Cleanup(func() {
+		buildFile = origBuildFile
+		buildOutput = origBuildOutput
+		buildProjectPrefix = origBuildProjectPrefix
+	})
+
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "components", "app")
+	if err := os.MkdirAll(compDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(compDir, ".env"), []byte("FROM_FILE=1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile .env: %v", err)
+	}
+
+	composeContent := `services:
+  app:
+    image: app:latest
+    env_file:
+      - .env
+    configs:
+      - source: app-config
+        target: /etc/app/config.yaml
+    tmpfs:
+      - /tmp
+    shm_size: 64m
+configs:
+  app-config:
+    content: "key: value"
+`
+	if err := os.WriteFile(filepath.Join(compDir, "compose.yaml"), []byte(composeContent), 0644); err != nil {
+		t.Fatalf("WriteFile compose.yaml: %v", err)
+	}
+
+	composedContent := `name: test
+services:
+  app:
+    x-compose-file: ./components/app/compose.yaml
+    environment:
+      EXTRA: from-composed
+`
+	cfgPath := filepath.Join(dir, "composed.yaml")
+	outPath := filepath.Join(dir, "docker-compose.yaml")
+	if err := os.WriteFile(cfgPath, []byte(composedContent), 0644); err != nil {
+		t.Fatalf("WriteFile composed.yaml: %v", err)
+	}
+
+	buildFile = cfgPath
+	buildOutput = outPath
+
+	if err := doBuild(); err != nil {
+		t.Fatalf("doBuild: %v", err)
+	}
+
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	s := string(out)
+
+	checks := []string{
+		"image: app:latest",
+		"EXTRA: from-composed",
+		"env_file:",
+		"components/app/.env",
+		"tmpfs:",
+		"/tmp",
+		"shm_size: 64m",
+		"configs:",
+		"source: app-config",
+		"target: /etc/app/config.yaml",
+		"content: 'key: value'",
+	}
+	for _, want := range checks {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing %q:\n%s", want, s)
+		}
+	}
+}
