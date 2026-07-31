@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/docker-x/composed/internal/compose"
@@ -265,6 +266,13 @@ func TestMerge_ServiceNewFields(t *testing.T) {
 	svc1 := compose.NewService("app:v1")
 	svc1.WorkingDir = "/old"
 	svc1.Secrets = []string{"old-secret"}
+	svc1.Configs = []compose.ServiceConfig{
+		{Source: "old-config", Target: "/etc/old"},
+		{Source: "shared-config", Target: "/etc/shared"},
+	}
+	svc1.EnvFile = []string{"old.env", "common.env"}
+	svc1.Tmpfs = []string{"/tmp/old", "/tmp/common"}
+	svc1.ShmSize = "32m"
 	f1.Services["app"] = svc1
 
 	f2 := compose.NewFile()
@@ -274,6 +282,14 @@ func TestMerge_ServiceNewFields(t *testing.T) {
 	svc2.NetworkMode = "service:db"
 	svc2.Restart = "unless-stopped"
 	svc2.Secrets = []string{"new-secret"}
+	svc2.Configs = []compose.ServiceConfig{
+		{Source: "new-config", Target: "/etc/new"},
+		{Source: "shared-config", Target: "/etc/shared"},
+		{Source: "shared-config", Target: "/etc/other"},
+	}
+	svc2.EnvFile = []string{"new.env", "common.env"}
+	svc2.Tmpfs = []string{"/tmp/new", "/tmp/common"}
+	svc2.ShmSize = "64m"
 	f2.Services["app"] = svc2
 
 	result := Merge("test", f1, f2)
@@ -290,8 +306,45 @@ func TestMerge_ServiceNewFields(t *testing.T) {
 	if app.Restart != "unless-stopped" {
 		t.Errorf("Restart = %q", app.Restart)
 	}
-	if len(app.Secrets) != 2 {
-		t.Errorf("Secrets = %v, want 2 unique", app.Secrets)
+	wantSecrets := []string{"old-secret", "new-secret"}
+	if !slices.Equal(app.Secrets, wantSecrets) {
+		t.Errorf("Secrets = %v, want %v", app.Secrets, wantSecrets)
+	}
+	wantConfigs := []compose.ServiceConfig{
+		{Source: "old-config", Target: "/etc/old"},
+		{Source: "shared-config", Target: "/etc/shared"},
+		{Source: "new-config", Target: "/etc/new"},
+		{Source: "shared-config", Target: "/etc/other"},
+	}
+	if !slices.Equal(app.Configs, wantConfigs) {
+		t.Errorf("Configs = %v, want %v", app.Configs, wantConfigs)
+	}
+	wantEnvFile := []string{"old.env", "common.env", "new.env"}
+	if !slices.Equal(app.EnvFile, wantEnvFile) {
+		t.Errorf("EnvFile = %v, want %v", app.EnvFile, wantEnvFile)
+	}
+	wantTmpfs := []string{"/tmp/old", "/tmp/common", "/tmp/new"}
+	if !slices.Equal(app.Tmpfs, wantTmpfs) {
+		t.Errorf("Tmpfs = %v, want %v", app.Tmpfs, wantTmpfs)
+	}
+	if app.ShmSize != "64m" {
+		t.Errorf("ShmSize = %q, want %q", app.ShmSize, "64m")
+	}
+}
+
+func TestMerge_ShmSizeRetention(t *testing.T) {
+	f1 := compose.NewFile()
+	svc1 := compose.NewService("app:v1")
+	svc1.ShmSize = "32m"
+	f1.Services["app"] = svc1
+
+	f2 := compose.NewFile()
+	svc2 := compose.NewService("")
+	f2.Services["app"] = svc2
+
+	result := Merge("test", f1, f2)
+	if result.Services["app"].ShmSize != "32m" {
+		t.Errorf("ShmSize = %q, want %q", result.Services["app"].ShmSize, "32m")
 	}
 }
 

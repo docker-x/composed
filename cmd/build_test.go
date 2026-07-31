@@ -844,6 +844,42 @@ func TestParseEnvFileList(t *testing.T) {
 	}
 }
 
+func TestParseConfigs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  []compose.ServiceConfig
+	}{
+		{"nil", nil, nil},
+		{"string", "my-config", []compose.ServiceConfig{{Source: "my-config"}}},
+		{"list of strings", []interface{}{"a", "b"}, []compose.ServiceConfig{{Source: "a"}, {Source: "b"}}},
+		{"list of objects", []interface{}{
+			map[string]interface{}{"source": "cfg", "target": "/etc/cfg"},
+		}, []compose.ServiceConfig{{Source: "cfg", Target: "/etc/cfg"}}},
+		{"missing source skipped", []interface{}{
+			map[string]interface{}{"target": "/etc/cfg"},
+		}, nil},
+		{"mixed", []interface{}{
+			"short",
+			map[string]interface{}{"source": "obj", "target": "/t"},
+		}, []compose.ServiceConfig{{Source: "short"}, {Source: "obj", Target: "/t"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConfigs(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseConfigs len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %v, want %v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestLoadEnvFile(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
@@ -1438,5 +1474,119 @@ configs:
 	}
 	if f.Configs["app_config"] == nil || f.Configs["app_config"].File != "./config/app.yaml" {
 		t.Errorf("configs = %v", f.Configs)
+	}
+}
+
+func TestDoBuild_XComposeFile_WithServiceRefs(t *testing.T) {
+	origBuildFile := buildFile
+	origBuildOutput := buildOutput
+	origBuildProjectPrefix := buildProjectPrefix
+	t.Cleanup(func() {
+		buildFile = origBuildFile
+		buildOutput = origBuildOutput
+		buildProjectPrefix = origBuildProjectPrefix
+	})
+
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "components", "app")
+	if err := os.MkdirAll(compDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(compDir, ".env"), []byte("FROM_FILE=1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile .env: %v", err)
+	}
+
+	composeContent := `services:
+  app:
+    image: app:latest
+    env_file:
+      - .env
+    configs:
+      - source: app-config
+        target: /etc/app/config.yaml
+    tmpfs:
+      - /tmp
+    shm_size: 64m
+configs:
+  app-config:
+    content: "key: value"
+`
+	if err := os.WriteFile(filepath.Join(compDir, "compose.yaml"), []byte(composeContent), 0644); err != nil {
+		t.Fatalf("WriteFile compose.yaml: %v", err)
+	}
+
+	composedContent := `name: test
+services:
+  app:
+    x-compose-file: ./components/app/compose.yaml
+    environment:
+      EXTRA: from-composed
+`
+	cfgPath := filepath.Join(dir, "composed.yaml")
+	outPath := filepath.Join(dir, "docker-compose.yaml")
+	if err := os.WriteFile(cfgPath, []byte(composedContent), 0644); err != nil {
+		t.Fatalf("WriteFile composed.yaml: %v", err)
+	}
+
+	buildFile = cfgPath
+	buildOutput = outPath
+
+	if err := doBuild(); err != nil {
+		t.Fatalf("doBuild: %v", err)
+	}
+
+	out, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	s := string(out)
+
+	checks := []string{
+		"image: app:latest",
+		"EXTRA: from-composed",
+		"env_file:",
+		"components/app/.env",
+		"tmpfs:",
+		"/tmp",
+		"shm_size: 64m",
+		"configs:",
+		"source: app-config",
+		"target: /etc/app/config.yaml",
+		"content: 'key: value'",
+	}
+	for _, want := range checks {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestResolveEnvFilePath(t *testing.T) {
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "components", "app")
+	outDir := dir
+	if err := os.MkdirAll(compDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		ef   string
+		want string
+	}{
+		{"relative to component", ".env", "components/app/.env"},
+		{"nested relative", "config/app.env", "components/app/config/app.env"},
+		{"absolute unchanged", "/etc/app.env", "/etc/app.env"},
+		{"variable prefix", "$ENV_DIR/app.env", "$ENV_DIR/app.env"},
+		{"variable interpolation", "${ENV_DIR}/app.env", "${ENV_DIR}/app.env"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveEnvFilePath(tt.ef, compDir, outDir)
+			if got != tt.want {
+				t.Errorf("resolveEnvFilePath(%q) = %q, want %q", tt.ef, got, tt.want)
+			}
+		})
 	}
 }

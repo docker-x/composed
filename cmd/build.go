@@ -542,11 +542,58 @@ func composeFragment(svc *config.Service) (*compose.File, error) {
 		dir := filepath.Dir(buildFile)
 		path = filepath.Join(dir, path)
 	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve compose file path %s: %w", path, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read compose file %s: %w", path, err)
 	}
-	return parseComposeYAML(data)
+	f, err := parseComposeYAML(data)
+	if err != nil {
+		return nil, err
+	}
+	compDir := filepath.Dir(path)
+	outDir := ""
+	if buildOutput != "" && buildOutput != "-" {
+		outDir = filepath.Dir(buildOutput)
+		if !filepath.IsAbs(outDir) {
+			if cwd, err := os.Getwd(); err == nil {
+				outDir = filepath.Join(cwd, outDir)
+			}
+		}
+	}
+	normalizeEnvFilePaths(f, compDir, outDir)
+	return f, nil
+}
+
+func normalizeEnvFilePaths(f *compose.File, compDir, outDir string) {
+	for _, svc := range f.Services {
+		for i, ef := range svc.EnvFile {
+			svc.EnvFile[i] = resolveEnvFilePath(ef, compDir, outDir)
+		}
+	}
+}
+
+// resolveEnvFilePath normalizes a fragment-relative env_file path so it can be
+// resolved from the generated output project. Relative paths are made absolute
+// against compDir; when an output directory is known, the absolute path is
+// rebased relative to that output directory. Variable-interpolation paths
+// ($VAR or ${VAR}) are preserved verbatim.
+func resolveEnvFilePath(ef, compDir, outDir string) string {
+	if filepath.IsAbs(ef) || strings.HasPrefix(ef, "$") || strings.Contains(ef, "${") {
+		return ef
+	}
+	abs := filepath.Join(compDir, ef)
+	if outDir == "" {
+		return abs
+	}
+	rel, err := filepath.Rel(outDir, abs)
+	if err != nil {
+		return abs
+	}
+	return rel
 }
 
 // helmToCompose renders a Helm chart and translates to compose.
@@ -852,6 +899,9 @@ type rawServiceStruct struct {
 		Timeout  string      `yaml:"timeout"`
 		Retries  int         `yaml:"retries"`
 	} `yaml:"healthcheck"`
+	Tmpfs   interface{} `yaml:"tmpfs"`
+	ShmSize interface{} `yaml:"shm_size"`
+	Configs interface{} `yaml:"configs"`
 }
 
 func parseRawService(svc rawServiceStruct) *compose.Service {
@@ -874,6 +924,9 @@ func parseRawService(svc rawServiceStruct) *compose.Service {
 	}
 
 	cs.EnvFile = parseEnvFileList(svc.EnvFile)
+	cs.Tmpfs = toStringSlice(svc.Tmpfs)
+	cs.ShmSize = shmSizeToString(svc.ShmSize)
+	cs.Configs = parseConfigs(svc.Configs)
 
 	if svc.Healthcheck != nil {
 		cs.Healthcheck = &compose.Healthcheck{
@@ -943,6 +996,40 @@ func toStringSlice(v interface{}) []string {
 	default:
 		return nil
 	}
+}
+
+func shmSizeToString(raw interface{}) string {
+	if raw == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", raw)
+}
+
+// parseConfigs extracts service-level config mounts from the raw YAML value.
+// Supports string ("my-config"), list of strings, and list of objects with
+// "source" and "target".
+func parseConfigs(raw interface{}) []compose.ServiceConfig {
+	switch v := raw.(type) {
+	case string:
+		return []compose.ServiceConfig{{Source: v}}
+	case []interface{}:
+		var out []compose.ServiceConfig
+		for _, item := range v {
+			switch entry := item.(type) {
+			case string:
+				out = append(out, compose.ServiceConfig{Source: entry})
+			case map[string]interface{}:
+				source, _ := entry["source"].(string)
+				if source == "" {
+					continue
+				}
+				target, _ := entry["target"].(string)
+				out = append(out, compose.ServiceConfig{Source: source, Target: target})
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // parseEnvFileList extracts a list of env_file paths from the raw YAML value.
