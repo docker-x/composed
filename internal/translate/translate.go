@@ -646,7 +646,7 @@ func (c *translateCtx) mountConfigData(
 		for _, e := range entries {
 			if e.key == subPath {
 				configName := fmt.Sprintf("%s-%s", sourceName, e.key)
-				c.cf.Configs[configName] = &compose.Config{Content: escapeConfigContent(e.content)}
+				c.cf.Configs[configName] = &compose.Config{Content: e.content}
 				svc.Configs = append(svc.Configs, compose.ServiceConfig{
 					Source: configName,
 					Target: mountPath,
@@ -658,20 +658,13 @@ func (c *translateCtx) mountConfigData(
 		// Directory mount: all keys become files under mountPath/
 		for _, e := range entries {
 			configName := fmt.Sprintf("%s-%s", sourceName, e.key)
-			c.cf.Configs[configName] = &compose.Config{Content: escapeConfigContent(e.content)}
+			c.cf.Configs[configName] = &compose.Config{Content: e.content}
 			svc.Configs = append(svc.Configs, compose.ServiceConfig{
 				Source: configName,
 				Target: path.Join(mountPath, e.key),
 			})
 		}
 	}
-}
-
-// escapeConfigContent preserves mounted ConfigMap and Secret data as literal
-// files. Docker Compose interpolates '$' in configs.content before mounting,
-// so shell scripts must use '$$' to retain '$' at runtime.
-func escapeConfigContent(content string) string {
-	return strings.ReplaceAll(content, "$", "$$")
 }
 
 func findVolume(vols []corev1.Volume, name string) *corev1.Volume {
