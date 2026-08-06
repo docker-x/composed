@@ -2,20 +2,32 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+`composed` is pre-1.0 and follows [Semantic Versioning](https://semver.org). Only the latest released minor version line receives full security updates; older lines may receive critical backports on a best-effort basis.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| Version | Supported |
+|---|---|
+| v0.6.x | :white_check_mark: |
+| v0.5.x | :warning: (critical fixes only, best effort) |
+| < v0.5.0 | :x: |
+
+We update this table when a new minor release is published. If you are running an unsupported version, upgrade to the latest release before reporting a security issue.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please do not open a public issue, discussion, or pull request for a security vulnerability. Instead, submit a private report so we can investigate and coordinate disclosure.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+**Preferred channel:** [Open a draft GitHub Security Advisory](https://github.com/docker-x/composed/security/advisories/new) for `docker-x/composed`.
+
+When reporting, include:
+
+- A clear description of the vulnerability and its impact.
+- Steps to reproduce or a proof-of-concept.
+- The affected version(s) and any suggested remediation.
+- Whether you would like public credit if we publish an advisory.
+
+**What to expect:**
+
+- **Acknowledgement:** within 5 business days.
+- **Status updates:** at least every 14 days, or sooner if there is significant progress.
+- **Triage outcome:** we will accept the report, decline it with an explanation, or request more information.
+- **Disclosure:** we follow coordinated disclosure. Once a fix is released, we typically publish the advisory and give credit (with your permission) 90 days after the fix is available, whichever comes first. We ask that you do not disclose the issue before we publish a fix unless mutually agreed.
