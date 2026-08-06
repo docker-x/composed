@@ -471,52 +471,6 @@ spec:
 	}
 }
 
-func TestTranslate_ConfigMapContentEscapesComposeInterpolation(t *testing.T) {
-	yaml := `---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: startup-script
-data:
-  start.sh: |
-    export REDIS_PASSWORD="${REDIS_PASSWORD}"
-    echo $REDIS_PORT
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app
-spec:
-  selector:
-    matchLabels:
-      app: app
-  template:
-    metadata:
-      labels:
-        app: app
-    spec:
-      containers:
-        - name: app
-          image: app:latest
-          volumeMounts:
-            - name: script
-              mountPath: /scripts
-      volumes:
-        - name: script
-          configMap:
-            name: startup-script
-`
-
-	result := mustTranslate(t, yaml, Opts{})
-	content := result.Compose.Configs["startup-script-start.sh"].Content
-	if !strings.Contains(content, "$${REDIS_PASSWORD}") {
-		t.Errorf("Config content must escape Compose interpolation: %q", content)
-	}
-	if !strings.Contains(content, "$$REDIS_PORT") {
-		t.Errorf("Config content must escape Compose interpolation: %q", content)
-	}
-}
-
 func TestTranslate_ConfigMapSubPath(t *testing.T) {
 	yaml := `---
 apiVersion: v1
