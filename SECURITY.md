@@ -10,7 +10,7 @@
 | v0.5.x | :warning: (critical fixes only, best effort) |
 | < v0.5.0 | :x: |
 
-We update this table when a new minor release is published. If you are running an unsupported version, upgrade to the latest release before reporting a security issue.
+We update this table when a new minor release is published. If you are running an unsupported version, include that version in your report. Upgrade to the latest release when possible, but do not delay reporting while you upgrade.
 
 ## Reporting a Vulnerability
 
@@ -30,4 +30,4 @@ When reporting, include:
 - **Acknowledgement:** within 5 business days.
 - **Status updates:** at least every 14 days, or sooner if there is significant progress.
 - **Triage outcome:** we will accept the report, decline it with an explanation, or request more information.
-- **Disclosure:** we follow coordinated disclosure. Once a fix is released, we typically publish the advisory and give credit (with your permission) 90 days after the fix is available, whichever comes first. We ask that you do not disclose the issue before we publish a fix unless mutually agreed.
+- **Disclosure:** we follow coordinated disclosure. Once a fix is available, we typically publish the advisory within 90 days. We may publish it earlier by mutual agreement. We give credit only with your permission. We ask that you do not disclose the issue before we publish a fix unless mutually agreed.
