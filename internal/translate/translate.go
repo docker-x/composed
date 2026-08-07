@@ -574,7 +574,7 @@ func (c *translateCtx) translateVolumeMount(
 		if !ok {
 			return
 		}
-		c.mountConfigData(svc, cmName, cm.Data, nil, mountPath, vm.SubPath)
+		c.mountConfigData(svc, "configmap", cmName, cm.Data, nil, mountPath, vm.SubPath)
 
 	case vol.EmptyDir != nil:
 		// In Compose, emptyDir maps to an anonymous volume at the mount path.
@@ -609,7 +609,7 @@ func (c *translateCtx) translateVolumeMount(
 		if !ok {
 			return
 		}
-		c.mountConfigData(svc, secName, sec.StringData, sec.Data, mountPath, vm.SubPath)
+		c.mountConfigData(svc, "secret", secName, sec.StringData, sec.Data, mountPath, vm.SubPath)
 	}
 }
 
@@ -619,7 +619,7 @@ func (c *translateCtx) translateVolumeMount(
 // If subPath is empty, all keys are mounted as files under mountPath/.
 func (c *translateCtx) mountConfigData(
 	svc *compose.Service,
-	sourceName string,
+	kind, sourceName string,
 	stringData map[string]string,
 	byteData map[string][]byte,
 	mountPath, subPath string,
@@ -645,7 +645,7 @@ func (c *translateCtx) mountConfigData(
 		// SubPath mount: only mount the matching key at the exact mountPath
 		for _, e := range entries {
 			if e.key == subPath {
-				configName := fmt.Sprintf("%s-%s", sourceName, e.key)
+				configName := fmt.Sprintf("%s-%s-%s", kind, sourceName, e.key)
 				c.cf.Configs[configName] = &compose.Config{Content: escapeConfigContent(e.content)}
 				svc.Configs = append(svc.Configs, compose.ServiceConfig{
 					Source: configName,
@@ -657,7 +657,7 @@ func (c *translateCtx) mountConfigData(
 	} else {
 		// Directory mount: all keys become files under mountPath/
 		for _, e := range entries {
-			configName := fmt.Sprintf("%s-%s", sourceName, e.key)
+			configName := fmt.Sprintf("%s-%s-%s", kind, sourceName, e.key)
 			c.cf.Configs[configName] = &compose.Config{Content: escapeConfigContent(e.content)}
 			svc.Configs = append(svc.Configs, compose.ServiceConfig{
 				Source: configName,
@@ -667,9 +667,9 @@ func (c *translateCtx) mountConfigData(
 	}
 }
 
-// escapeConfigContent preserves mounted ConfigMap and Secret data as literal
-// files. Docker Compose interpolates '$' in configs.content before mounting,
-// so shell scripts must use '$$' to retain '$' at runtime.
+// escapeConfigContent escapes literal '$' as '$$' in generated configs.content.
+// Docker Compose expands '$$' back to a single '$' when mounting, preventing
+// host-side interpolation of variables in the mounted file.
 func escapeConfigContent(content string) string {
 	return strings.ReplaceAll(content, "$", "$$")
 }

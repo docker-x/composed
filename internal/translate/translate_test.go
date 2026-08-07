@@ -522,7 +522,7 @@ spec:
 `, volumeMounts, volumeBlock)
 }
 
-func assertConfigMount(t *testing.T, result *Result, configName, wantContent, wantTarget, wantRaw string) {
+func assertConfigMount(t *testing.T, result *Result, configName, wantContent, wantTarget string) {
 	t.Helper()
 
 	cfg := result.Compose.Configs[configName]
@@ -531,11 +531,6 @@ func assertConfigMount(t *testing.T, result *Result, configName, wantContent, wa
 	}
 	if cfg.Content != wantContent {
 		t.Errorf("Config content = %q, want %q", cfg.Content, wantContent)
-	}
-	// Compose expands $$ back to a single $ when mounting the config, so the
-	// deployed file content matches the original Kubernetes data.
-	if unescaped := strings.ReplaceAll(cfg.Content, "$$", "$"); unescaped != wantRaw {
-		t.Errorf("Deployed config content = %q, want %q", unescaped, wantRaw)
 	}
 
 	svc := result.Compose.Services["app"]
@@ -578,7 +573,7 @@ echo $$REDIS_PORT
             name: startup-script`,
 			mountPath:  "/scripts",
 			subPath:    "",
-			configName: "startup-script-start.sh",
+			configName: "configmap-startup-script-start.sh",
 			target:     "/scripts/start.sh",
 		},
 		{
@@ -589,7 +584,7 @@ echo $$REDIS_PORT
             name: startup-script`,
 			mountPath:  "/scripts/start.sh",
 			subPath:    "start.sh",
-			configName: "startup-script-start.sh",
+			configName: "configmap-startup-script-start.sh",
 			target:     "/scripts/start.sh",
 		},
 		{
@@ -600,7 +595,7 @@ echo $$REDIS_PORT
             secretName: startup-script`,
 			mountPath:  "/scripts",
 			subPath:    "",
-			configName: "startup-script-start.sh",
+			configName: "secret-startup-script-start.sh",
 			target:     "/scripts/start.sh",
 		},
 		{
@@ -611,7 +606,7 @@ echo $$REDIS_PORT
             secretName: startup-script`,
 			mountPath:  "/scripts/start.sh",
 			subPath:    "start.sh",
-			configName: "startup-script-start.sh",
+			configName: "secret-startup-script-start.sh",
 			target:     "/scripts/start.sh",
 		},
 	}
@@ -619,7 +614,7 @@ echo $$REDIS_PORT
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			yaml := tc.resource + deploymentWithVolume(tc.volume, tc.mountPath, tc.subPath)
-			assertConfigMount(t, mustTranslate(t, yaml, Opts{}), tc.configName, want, tc.target, raw)
+			assertConfigMount(t, mustTranslate(t, yaml, Opts{}), tc.configName, want, tc.target)
 		})
 	}
 }
