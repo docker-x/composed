@@ -2,6 +2,8 @@ package translate
 
 import (
 	"bytes"
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -468,6 +470,152 @@ spec:
 	}
 	if !strings.Contains(cfg.Content, "listen 80") {
 		t.Errorf("Config content = %q", cfg.Content)
+	}
+}
+
+func configContentFixture(kind, name, key, content string) string {
+	lines := strings.Split(content, "\n")
+	// content ends with a trailing newline, so the last element is empty; skip it.
+	var indented []string
+	for i, line := range lines {
+		if i == len(lines)-1 && line == "" {
+			continue
+		}
+		indented = append(indented, "    "+line)
+	}
+	block := strings.Join(indented, "\n") + "\n"
+
+	if kind == "Secret" {
+		encoded := base64.StdEncoding.EncodeToString([]byte(content))
+		return fmt.Sprintf("---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\ndata:\n  %s: %s\n", name, key, encoded)
+	}
+	return fmt.Sprintf("---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\ndata:\n  %s: |\n%s", name, key, block)
+}
+
+func deploymentWithVolume(volumeBlock, mountPath, subPath string) string {
+	volumeMounts := fmt.Sprintf(`            - name: script
+              mountPath: %s`, mountPath)
+	if subPath != "" {
+		volumeMounts += fmt.Sprintf("\n              subPath: %s", subPath)
+	}
+	return fmt.Sprintf(`---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+          volumeMounts:
+%s
+      volumes:
+%s
+`, volumeMounts, volumeBlock)
+}
+
+func assertConfigMount(t *testing.T, result *Result, configName, wantContent, wantTarget string) {
+	t.Helper()
+
+	cfg := result.Compose.Configs[configName]
+	if cfg == nil {
+		t.Fatalf("missing config %q", configName)
+	}
+	if cfg.Content != wantContent {
+		t.Errorf("Config content = %q, want %q", cfg.Content, wantContent)
+	}
+
+	svc := result.Compose.Services["app"]
+	if svc == nil {
+		t.Fatal("missing app service")
+	}
+	if len(svc.Configs) != 1 {
+		t.Fatalf("Configs count = %d, want 1", len(svc.Configs))
+	}
+	if svc.Configs[0].Source != configName {
+		t.Errorf("Config source = %q, want %q", svc.Configs[0].Source, configName)
+	}
+	if svc.Configs[0].Target != wantTarget {
+		t.Errorf("Config target = %q, want %q", svc.Configs[0].Target, wantTarget)
+	}
+}
+
+func TestTranslate_ConfigContentEscapesComposeInterpolation(t *testing.T) {
+	const raw = `export REDIS_PASSWORD="${REDIS_PASSWORD}"
+echo $REDIS_PORT
+`
+	const want = `export REDIS_PASSWORD="$${REDIS_PASSWORD}"
+echo $$REDIS_PORT
+`
+
+	cases := []struct {
+		name       string
+		resource   string
+		volume     string
+		mountPath  string
+		subPath    string
+		configName string
+		target     string
+	}{
+		{
+			name:     "configmap directory mount",
+			resource: configContentFixture("ConfigMap", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          configMap:
+            name: startup-script`,
+			mountPath:  "/scripts",
+			subPath:    "",
+			configName: "configmap-startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+		{
+			name:     "configmap subPath mount",
+			resource: configContentFixture("ConfigMap", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          configMap:
+            name: startup-script`,
+			mountPath:  "/scripts/start.sh",
+			subPath:    "start.sh",
+			configName: "configmap-startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+		{
+			name:     "secret directory mount",
+			resource: configContentFixture("Secret", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          secret:
+            secretName: startup-script`,
+			mountPath:  "/scripts",
+			subPath:    "",
+			configName: "secret-startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+		{
+			name:     "secret subPath mount",
+			resource: configContentFixture("Secret", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          secret:
+            secretName: startup-script`,
+			mountPath:  "/scripts/start.sh",
+			subPath:    "start.sh",
+			configName: "secret-startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := tc.resource + deploymentWithVolume(tc.volume, tc.mountPath, tc.subPath)
+			assertConfigMount(t, mustTranslate(t, yaml, Opts{}), tc.configName, want, tc.target)
+		})
 	}
 }
 

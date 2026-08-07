@@ -581,10 +581,16 @@ the ports go on the StatefulSet's compose service.
 | `volumeMount` referencing a ConfigMap | Compose `configs:` top-level + service config mount |
 | Unreferenced | Skipped with warning |
 
-### Secret → Environment
+The generated Compose file stores each literal `$` in `configs.content` as `$$`.
+At deploy time Compose expands `$$` back to a single `$`, so the mounted file
+retains the original Kubernetes content and no environment-variable substitution
+occurs.
 
-Same as ConfigMap, but `.data` values are base64-decoded. A warning is emitted
-that secrets will appear as plaintext in the compose file.
+### Secret → Environment or Config
+
+Same as ConfigMap, but `.data` values are base64-decoded. A `volumeMount`
+referencing a Secret is also mapped to Compose `configs:`. A warning is emitted
+that secret values will appear as plaintext in the compose file.
 
 ### Top-level Secrets
 
