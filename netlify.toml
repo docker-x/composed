@@ -1,5 +1,8 @@
 [build]
   base = "website"
-  command = "bun install && bun run build"
+  command = "bun install --frozen-lockfile --ignore-scripts && bun run build"
   publish = "build"
   ignore = "/bin/false"
+
+[context.deploy-preview]
+  ignore = "true"
