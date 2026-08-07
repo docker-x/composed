@@ -522,6 +522,32 @@ spec:
 `, volumeMounts, volumeBlock)
 }
 
+func assertConfigMount(t *testing.T, result *Result, configName, wantContent, wantTarget string) {
+	t.Helper()
+
+	cfg := result.Compose.Configs[configName]
+	if cfg == nil {
+		t.Fatalf("missing config %q", configName)
+	}
+	if cfg.Content != wantContent {
+		t.Errorf("Config content = %q, want %q", cfg.Content, wantContent)
+	}
+
+	svc := result.Compose.Services["app"]
+	if svc == nil {
+		t.Fatal("missing app service")
+	}
+	if len(svc.Configs) != 1 {
+		t.Fatalf("Configs count = %d, want 1", len(svc.Configs))
+	}
+	if svc.Configs[0].Source != configName {
+		t.Errorf("Config source = %q, want %q", svc.Configs[0].Source, configName)
+	}
+	if svc.Configs[0].Target != wantTarget {
+		t.Errorf("Config target = %q, want %q", svc.Configs[0].Target, wantTarget)
+	}
+}
+
 func TestTranslate_ConfigContentEscapesComposeInterpolation(t *testing.T) {
 	const raw = `export REDIS_PASSWORD="${REDIS_PASSWORD}"
 echo $REDIS_PORT
@@ -588,29 +614,7 @@ echo $$REDIS_PORT
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			yaml := tc.resource + deploymentWithVolume(tc.volume, tc.mountPath, tc.subPath)
-			result := mustTranslate(t, yaml, Opts{})
-
-			cfg := result.Compose.Configs[tc.configName]
-			if cfg == nil {
-				t.Fatalf("missing config %q", tc.configName)
-			}
-			if cfg.Content != want {
-				t.Errorf("Config content = %q, want %q", cfg.Content, want)
-			}
-
-			svc := result.Compose.Services["app"]
-			if svc == nil {
-				t.Fatal("missing app service")
-			}
-			if len(svc.Configs) != 1 {
-				t.Fatalf("Configs count = %d, want 1", len(svc.Configs))
-			}
-			if svc.Configs[0].Source != tc.configName {
-				t.Errorf("Config source = %q, want %q", svc.Configs[0].Source, tc.configName)
-			}
-			if svc.Configs[0].Target != tc.target {
-				t.Errorf("Config target = %q, want %q", svc.Configs[0].Target, tc.target)
-			}
+			assertConfigMount(t, mustTranslate(t, yaml, Opts{}), tc.configName, want, tc.target)
 		})
 	}
 }

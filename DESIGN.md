@@ -581,10 +581,14 @@ the ports go on the StatefulSet's compose service.
 | `volumeMount` referencing a ConfigMap | Compose `configs:` top-level + service config mount |
 | Unreferenced | Skipped with warning |
 
-### Secret → Environment
+Content mounted through Compose `configs:` has every literal `$` doubled to `$$` so Docker Compose does not substitute environment variables before the file is
+mounted.
 
-Same as ConfigMap, but `.data` values are base64-decoded. A warning is emitted
-that secrets will appear as plaintext in the compose file.
+### Secret → Environment or Config
+
+Same as ConfigMap, but `.data` values are base64-decoded. A `volumeMount`
+referencing a Secret is also mapped to Compose `configs:`. A warning is emitted
+that secret values will appear as plaintext in the compose file.
 
 ### Top-level Secrets
 
