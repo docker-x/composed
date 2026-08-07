@@ -5,15 +5,8 @@ tagFormat: "v${version}"
 plugins:
   - "@semantic-release/commit-analyzer"
   - "@semantic-release/release-notes-generator"
-  - "@semantic-release/changelog"
-  - - "@semantic-release/git"
-    - assets:
-        - CHANGELOG.md
-      message: |
-        chore(release): ${nextRelease.version} [skip ci]
-
-        ${nextRelease.notes}
   - - "@semantic-release/exec"
     - publishCmd: |
-        echo "${nextRelease.notes}" > /tmp/release-notes.md
-        goreleaser release --release-notes /tmp/release-notes.md --clean
+        tag="v${nextRelease.version}"
+        git tag "$tag"
+        GORELEASER_CURRENT_TAG="$tag" goreleaser release --clean
