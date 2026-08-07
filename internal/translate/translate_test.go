@@ -2,6 +2,8 @@ package translate
 
 import (
 	"bytes"
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -471,17 +473,32 @@ spec:
 	}
 }
 
-func TestTranslate_ConfigMapContentEscapesComposeInterpolation(t *testing.T) {
-	yaml := `---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: startup-script
-data:
-  start.sh: |
-    export REDIS_PASSWORD="${REDIS_PASSWORD}"
-    echo $REDIS_PORT
----
+func configContentFixture(kind, name, key, content string) string {
+	lines := strings.Split(content, "\n")
+	// content ends with a trailing newline, so the last element is empty; skip it.
+	var indented []string
+	for i, line := range lines {
+		if i == len(lines)-1 && line == "" {
+			continue
+		}
+		indented = append(indented, "    "+line)
+	}
+	block := strings.Join(indented, "\n") + "\n"
+
+	if kind == "Secret" {
+		encoded := base64.StdEncoding.EncodeToString([]byte(content))
+		return fmt.Sprintf("---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: %s\ndata:\n  %s: %s\n", name, key, encoded)
+	}
+	return fmt.Sprintf("---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\ndata:\n  %s: |\n%s", name, key, block)
+}
+
+func deploymentWithVolume(volumeBlock, mountPath, subPath string) string {
+	volumeMounts := fmt.Sprintf(`            - name: script
+              mountPath: %s`, mountPath)
+	if subPath != "" {
+		volumeMounts += fmt.Sprintf("\n              subPath: %s", subPath)
+	}
+	return fmt.Sprintf(`---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -499,21 +516,102 @@ spec:
         - name: app
           image: app:latest
           volumeMounts:
-            - name: script
-              mountPath: /scripts
+%s
       volumes:
-        - name: script
-          configMap:
-            name: startup-script
+%s
+`, volumeMounts, volumeBlock)
+}
+
+func TestTranslate_ConfigContentEscapesComposeInterpolation(t *testing.T) {
+	const raw = `export REDIS_PASSWORD="${REDIS_PASSWORD}"
+echo $REDIS_PORT
+`
+	const want = `export REDIS_PASSWORD="$${REDIS_PASSWORD}"
+echo $$REDIS_PORT
 `
 
-	result := mustTranslate(t, yaml, Opts{})
-	content := result.Compose.Configs["startup-script-start.sh"].Content
-	if !strings.Contains(content, "$${REDIS_PASSWORD}") {
-		t.Errorf("Config content must escape Compose interpolation: %q", content)
+	cases := []struct {
+		name       string
+		resource   string
+		volume     string
+		mountPath  string
+		subPath    string
+		configName string
+		target     string
+	}{
+		{
+			name:     "configmap directory mount",
+			resource: configContentFixture("ConfigMap", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          configMap:
+            name: startup-script`,
+			mountPath:  "/scripts",
+			subPath:    "",
+			configName: "startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+		{
+			name:     "configmap subPath mount",
+			resource: configContentFixture("ConfigMap", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          configMap:
+            name: startup-script`,
+			mountPath:  "/scripts/start.sh",
+			subPath:    "start.sh",
+			configName: "startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+		{
+			name:     "secret directory mount",
+			resource: configContentFixture("Secret", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          secret:
+            secretName: startup-script`,
+			mountPath:  "/scripts",
+			subPath:    "",
+			configName: "startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
+		{
+			name:     "secret subPath mount",
+			resource: configContentFixture("Secret", "startup-script", "start.sh", raw),
+			volume: `        - name: script
+          secret:
+            secretName: startup-script`,
+			mountPath:  "/scripts/start.sh",
+			subPath:    "start.sh",
+			configName: "startup-script-start.sh",
+			target:     "/scripts/start.sh",
+		},
 	}
-	if !strings.Contains(content, "$$REDIS_PORT") {
-		t.Errorf("Config content must escape Compose interpolation: %q", content)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := tc.resource + deploymentWithVolume(tc.volume, tc.mountPath, tc.subPath)
+			result := mustTranslate(t, yaml, Opts{})
+
+			cfg := result.Compose.Configs[tc.configName]
+			if cfg == nil {
+				t.Fatalf("missing config %q", tc.configName)
+			}
+			if cfg.Content != want {
+				t.Errorf("Config content = %q, want %q", cfg.Content, want)
+			}
+
+			svc := result.Compose.Services["app"]
+			if svc == nil {
+				t.Fatal("missing app service")
+			}
+			if len(svc.Configs) != 1 {
+				t.Fatalf("Configs count = %d, want 1", len(svc.Configs))
+			}
+			if svc.Configs[0].Source != tc.configName {
+				t.Errorf("Config source = %q, want %q", svc.Configs[0].Source, tc.configName)
+			}
+			if svc.Configs[0].Target != tc.target {
+				t.Errorf("Config target = %q, want %q", svc.Configs[0].Target, tc.target)
+			}
+		})
 	}
 }
 
