@@ -2,14 +2,20 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # Gate: run full test suite before releasing
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -29,6 +35,9 @@ jobs:
     name: Release
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,25 +47,34 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run GoReleaser
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          install-only: true
+
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v6
+        with:
+          semantic_version: 25.0.9
+          extra_plugins: |
+            @semantic-release/changelog@7.0.0
+            @semantic-release/exec@7.1.0
+            @semantic-release/git@11.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-  # Trigger pkg.go.dev to index the new version
-  publish-go-module:
-    name: Publish Go Module
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger pkg.go.dev indexing
+      - name: Publish Go module
+        if: steps.semantic.outputs.new_release_published == 'true'
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
+          tag="v${{ steps.semantic.outputs.new_release_version }}"
           url="https://proxy.golang.org/github.com/docker-x/composed/@v/${tag}.info"
           echo "Requesting: $url"
           curl -sf "$url" || echo "pkg.go.dev will index on next fetch"
