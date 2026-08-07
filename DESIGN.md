@@ -581,8 +581,10 @@ the ports go on the StatefulSet's compose service.
 | `volumeMount` referencing a ConfigMap | Compose `configs:` top-level + service config mount |
 | Unreferenced | Skipped with warning |
 
-Content mounted through Compose `configs:` has every literal `$` doubled to `$$` so Docker Compose does not substitute environment variables before the file is
-mounted.
+The generated Compose file stores each literal `$` in `configs.content` as `$$`.
+At deploy time Compose expands `$$` back to a single `$`, so the mounted file
+retains the original Kubernetes content and no environment-variable substitution
+occurs.
 
 ### Secret → Environment or Config
 
