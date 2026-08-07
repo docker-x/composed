@@ -5,14 +5,13 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-
 jobs:
   # Gate: run full test suite before releasing
   test:
     name: Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -55,6 +54,7 @@ jobs:
     name: Publish Go Module
     needs: release
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Trigger pkg.go.dev indexing
         run: |
