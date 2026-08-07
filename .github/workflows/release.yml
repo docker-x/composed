@@ -34,11 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      issues: write
-      pull-requests: write
-    outputs:
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,21 +56,24 @@ jobs:
 
       - name: Semantic Release
         id: semantic
-        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
-        with:
-          semantic_version: 25.0.9
-          extra_plugins: |
-            @semantic-release/changelog@7.0.0
-            @semantic-release/exec@7.1.0
-            @semantic-release/git@11.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          npx -p semantic-release@25.0.9 \
+              -p @semantic-release/changelog@7.0.0 \
+              -p @semantic-release/exec@7.1.0 \
+              -p @semantic-release/git@11.0.1 \
+              semantic-release
 
       - name: Publish Go module
-        if: steps.semantic.outputs.new_release_published == 'true'
+        if: steps.semantic.outcome == 'success'
         run: |
-          tag="v${{ steps.semantic.outputs.new_release_version }}"
-          url="https://proxy.golang.org/github.com/docker-x/composed/@v/${tag}.info"
-          echo "Requesting: $url"
-          curl -sf "$url" || echo "pkg.go.dev will index on next fetch"
+          tag=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+          if [ -n "$tag" ]; then
+            url="https://proxy.golang.org/github.com/docker-x/composed/@v/${tag}.info"
+            echo "Requesting: $url"
+            curl -sf "$url" || echo "pkg.go.dev will index on next fetch"
+          else
+            echo "No release tag on HEAD; skipping pkg.go.dev ping"
+          fi
